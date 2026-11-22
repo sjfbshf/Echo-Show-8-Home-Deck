@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Deck</title>
+<style>
+  :root {
+    --bg: #0b0d14;
+    --panel: rgba(255,255,255,0.05);
+    --line: rgba(255,255,255,0.10);
+    --text: #f2f0ea;
+    --dim: #9a98a6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(ellipse at 50% 120%, #1c1630 0%, var(--bg) 60%);
+    color: var(--text);
+    font-family: "Segoe UI", Roboto, system-ui, sans-serif;
+    display: grid;
+    grid-template-columns: 1fr 300px 1fr;
+    gap: 20px;
+    padding: 20px;
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+  }
+
+  /* left and right decks */
+  .deck {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    padding: 18px;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 14px;
+    min-height: 0;
+  }
+  .deck h2 {
+    font-size: 15px; font-weight: 600; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--dim);
+  }
+  .pads {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-auto-rows: 1fr;
+    gap: 14px;
+    min-height: 0;
+  }
+  .pad {
+    position: relative;
+    display: flex; flex-direction: column; justify-content: flex-end;
+    padding: 16px;
+    border-radius: 20px;
+    background: linear-gradient(160deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+    border: 1px solid var(--line);
+    color: var(--text);
+    text-decoration: none;
+    overflow: hidden;
+    transition: transform .12s ease, box-shadow .2s ease;
+  }
+  /* coloured "LED" strip along the top of each pad */
+  .pad::before {
+    content: ""; position: absolute; left: 16px; right: 16px; top: 14px;
+    height: 6px; border-radius: 3px;
+    background: var(--c); box-shadow: 0 0 14px var(--c);
+    opacity: .85;
+  }
+  .pad .name { font-size: 26px; font-weight: 650; line-height: 1.1; }
+  .pad .hint { font-size: 15px; color: var(--dim); margin-top: 4px; }
+  .pad:active, .pad.hit {
+    transform: scale(.96);
+    box-shadow: inset 0 0 0 2px var(--c), 0 0 30px -6px var(--c);
+  }
+  .pad:focus-visible { outline: 3px solid var(--c); outline-offset: 3px; }
+
+  /* centre mixer */
+  .mixer {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px; text-align: center;
+  }
+  .platter {
+    width: 240px; height: 240px; border-radius: 50%;
+    background:
+      radial-gradient(circle, #d9a441 0 14%, #111 14.5% 16%, transparent 16.5%),
+      repeating-radial-gradient(circle, #15151c 0 3px, #1d1d26 3px 5px);
+    border: 2px solid var(--line);
+    box-shadow: 0 20px 60px -20px #000, inset 0 0 40px #000;
+    position: relative;
+    animation: spin 8s linear infinite;
+  }
+  /* a light streak so the spin is visible */
+  .platter::after {
+    content: ""; position: absolute; inset: 8%;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 0 20%, rgba(255,255,255,.08) 25%, transparent 30% 70%, rgba(255,255,255,.06) 75%, transparent 80%);
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .time { font-size: 64px; font-weight: 300; letter-spacing: -.02em; line-height: 1; }
+  .date { font-size: 20px; color: var(--dim); }
+  .greet { font-size: 18px; color: #d9a441; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .platter { animation: none; }
+    .pad { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<section class="deck" aria-labelledby="left-title">
+  <h2 id="left-title">Ask &amp; Learn</h2>
+  <div class="pads" id="left"></div>
+</section>
+
+<section class="mixer">
+  <div class="platter" aria-hidden="true"></div>
+  <div class="time" id="time">--:--</div>
+  <div class="date" id="date"></div>
+  <div class="greet" id="greet"></div>
+</section>
+
+<section class="deck" aria-labelledby="right-title">
+  <h2 id="right-title">Watch &amp; Listen</h2>
+  <div class="pads" id="right"></div>
+</section>
+
+<script>
+  // Edit these to change the buttons. c = the pad's light colour.
+  var LEFT = [
+    { name: "Claude",   hint: "Ask anything",    url: "https://claude.ai",              c: "#e0895a" },
+    { name: "ChatGPT",  hint: "Ask anything",    url: "https://chatgpt.com",            c: "#5ad1a8" },
+    { name: "Gemini",   hint: "Ask anything",    url: "https://gemini.google.com",      c: "#7c9cff" },
+    // Replace with your school's Canvas address, e.g. https://yourschool.instructure.com
+    { name: "Canvas",   hint: "School",          url: "https://canvas.instructure.com", c: "#ff5f6d" },
+    { name: "Calendar", hint: "What's on today", url: "https://calendar.google.com",    c: "#ffd166" },
+    { name: "Weather",  hint: "Forecast",        url: "https://www.google.com/search?q=weather", c: "#6fd3ff" }
+  ];
+  var RIGHT = [
+    { name: "YouTube",  hint: "Videos",          url: "https://m.youtube.com",          c: "#ff4d4d" },
+    { name: "Spotify",  hint: "Music",           url: "https://open.spotify.com",       c: "#3ddc84" },
+    { name: "Radio",    hint: "Live stations",   url: "https://tunein.com",             c: "#c08bff" },
+    { name: "News",     hint: "Headlines",       url: "https://news.google.com",        c: "#f4f1de" },
+    { name: "Photos",   hint: "Family pictures", url: "https://photos.google.com",      c: "#ffa94d" },
+    { name: "Recipes",  hint: "What to cook",    url: "https://www.allrecipes.com",     c: "#9be564" }
+  ];
+
+  function build(list, id) {
+    var box = document.getElementById(id);
+    list.forEach(function (p) {
+      console.assert(/^https:\/\//.test(p.url), "Pad URL must start with https://", p);
+      var a = document.createElement("a");
+      a.className = "pad";
+      a.href = p.url; // same tab: Silk's Back button returns here
+      a.style.setProperty("--c", p.c);
+      a.innerHTML = '<span class="name"></span><span class="hint"></span>';
+      a.firstChild.textContent = p.name;
+      a.lastChild.textContent = p.hint;
+      // flash the pad so a tap feels like hitting a DJ pad
+      a.addEventListener("touchstart", function () { a.classList.add("hit"); }, { passive: true });
+      box.appendChild(a);
+    });
+  }
+  build(LEFT, "left");
+  build(RIGHT, "right");
+
+  function tick() {
+    var d = new Date();
+    document.getElementById("time").textContent =
+      d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    document.getElementById("date").textContent =
+      d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+    var h = d.getHours();
+    document.getElementById("greet").textContent =
+      h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+  }
+  tick();
+  setInterval(tick, 10000);
+</script>
+</body>
+</html>
