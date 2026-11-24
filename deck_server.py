@@ -36,6 +36,7 @@ ALL = PADS["left"] + PADS["right"]
 PC_PADS = [p for p in ALL if "pc" in p]
 ACTIONS = {p["id"]: p["pc"] for p in PC_PADS}
 WINDOWS = {p["id"]: p["window"].lower() for p in PC_PADS if p.get("window")}  # program to bring to the front
+REUSE = {p["id"] for p in PC_PADS if p.get("reuse") and p.get("window")}  # bring back the open window instead of opening another
 assert len(ACTIONS) == len(PC_PADS), "every PC pad needs its own unique id"
 assert all(p["url"].startswith("https://") or (HERE / p["url"]).is_file() for p in ALL if "pc" not in p), "Echo pads need an https:// link or a page in this folder"
 
@@ -58,7 +59,8 @@ for _f, _args in {"GetWindowThreadProcessId": [_wt.HWND, ctypes.c_void_p], "IsWi
                   "GetWindow": [_wt.HWND, _wt.UINT], "GetWindowLongW": [_wt.HWND, ctypes.c_int], "IsIconic": [_wt.HWND],
                   "ShowWindow": [_wt.HWND, ctypes.c_int], "BringWindowToTop": [_wt.HWND], "SetForegroundWindow": [_wt.HWND],
                   "SetWindowPos": [_wt.HWND, _wt.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, _wt.UINT],
-                  "AttachThreadInput": [_wt.DWORD, _wt.DWORD, _wt.BOOL], "EnumWindows": [_EnumProc, _wt.LPARAM]}.items():
+                  "AttachThreadInput": [_wt.DWORD, _wt.DWORD, _wt.BOOL], "EnumWindows": [_EnumProc, _wt.LPARAM],
+                  "SendMessageTimeoutW": [_wt.HWND, _wt.UINT, _wt.WPARAM, _wt.LPARAM, _wt.UINT, _wt.UINT, ctypes.c_void_p]}.items():
     getattr(_u32, _f).argtypes = _args  # 64-bit window handles must not be cut down to 32 bits
 _u32.GetWindowThreadProcessId.restype = _wt.DWORD
 _u32.GetForegroundWindow.restype = _wt.HWND
@@ -92,7 +94,9 @@ def app_windows(exe):
 
 def to_front(hwnd):
     if _u32.IsIconic(hwnd):
-        _u32.ShowWindow(hwnd, 9)  # SW_RESTORE: un-minimise
+        # un-minimise the way the taskbar does (WM_SYSCOMMAND, SC_RESTORE), then let the animation finish
+        _u32.SendMessageTimeoutW(hwnd, 0x0112, 0xF120, 0, 0x2, 1000, None)
+        time.sleep(0.3)
     me, fg = _k32.GetCurrentThreadId(), _u32.GetWindowThreadProcessId(_u32.GetForegroundWindow(), None)
     target = _u32.GetWindowThreadProcessId(hwnd, None)
     # joining the input of the app in front lets this helper hand the focus over (the usual way around the rule)
@@ -111,8 +115,33 @@ def to_front(hwnd):
     return _u32.GetForegroundWindow() == hwnd
 
 
-def open_in_front(target, exe):
-    before = set(app_windows(exe)) if exe else set()
+def keep_in_front(hwnd, was_front):
+    """Bring hwnd to the front and keep it there for 2.5 s against the window that was in front before
+    (some apps, Brave for one, take the focus back a moment later). Clicking anything else is left alone."""
+    for _ in range(3):
+        if to_front(hwnd):
+            break
+        time.sleep(0.2)
+    else:
+        return False
+    fixes, end = 0, time.time() + 2.5
+    while time.time() < end and fixes < 2:
+        time.sleep(0.15)
+        now = _u32.GetForegroundWindow()
+        if now == was_front:  # the old window grabbed it back, not something you chose
+            fixes += 1
+            to_front(hwnd)
+    return _u32.GetForegroundWindow() == hwnd
+
+
+def open_in_front(target, exe, reuse=False):
+    was_front = _u32.GetForegroundWindow()
+    before = app_windows(exe) if exe else []
+    if reuse and before:  # "reuse": just bring back the window that's already open (Terminal would make a new one each time)
+        if not keep_in_front(before[0], was_front):
+            print(f"Couldn't bring {exe} to the front (in front: {_exe_of(_u32.GetForegroundWindow()) or 'unknown'})")
+        return
+    before = set(before)
     os.startfile(target)  # Windows: opens the app, URI or link like double-clicking it
     if not exe:
         return
@@ -121,12 +150,10 @@ def open_in_front(target, exe):
         time.sleep(0.2)
         wins = app_windows(exe)
         new = [w for w in wins if w not in before]
-        # a brand-new window (Terminal opens one each time) wins; an app that was already open uses its front window
+        # a brand-new window wins; an app that was already open (it just shows itself) uses its front window
         pick = new[0] if new else (wins[0] if wins and time.time() > end - 4.5 else None)
-        if pick and to_front(pick):
-            time.sleep(0.4)  # apps sometimes take the focus back right after: check, and try again if so
-            if _u32.GetForegroundWindow() == pick:
-                return
+        if pick and keep_in_front(pick, was_front):
+            return
     print(f"Couldn't bring {exe} to the front (in front: {_exe_of(_u32.GetForegroundWindow()) or 'unknown'})")
 
 
@@ -471,7 +498,8 @@ class Deck(BaseHTTPRequestHandler):
         target = ACTIONS.get(url.path.removeprefix("/run/"))
         if target is None:
             return self._send(404, b"Unknown pad")
-        threading.Thread(target=open_in_front, args=(target, WINDOWS.get(url.path.removeprefix("/run/"))), daemon=True).start()
+        pad = url.path.removeprefix("/run/")
+        threading.Thread(target=open_in_front, args=(target, WINDOWS.get(pad), pad in REUSE), daemon=True).start()
         self._send(204)
 
 

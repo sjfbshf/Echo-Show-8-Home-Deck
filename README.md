@@ -43,6 +43,7 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
    - `pc` can be a program's path, a link, or a Store app as `shell:AppsFolder\…`. To find a Store app's name, run `Get-StartApps` in PowerShell.
    - App IDs can differ between installs, so check the sample ones. For example, the ChatGPT app on my PC is listed as `OpenAI.Codex_…`.
    - `window` (optional) is the app's program name, as shown in Task Manager's **Details** tab (like `Obsidian.exe`). Windows doesn't let a background program put another app in front, so without it an app can open behind your other windows. With it, the helper brings the app's window to the front, un-minimizing it if needed.
+   - `reuse` (optional, with `window`): `true` brings back the app's open window instead of opening another one. The sample Terminal pad uses it, since Terminal opens a new window each time.
 4. **Start the PC helper:** `python deck_server.py`.
    - When Windows Firewall asks, allow Python on **private** networks.
    - To start it hidden at every login, make a shortcut in `shell:startup` to `pythonw.exe "C:\path\to\deck_server.py"`. Its output then goes to `deck.log`.
