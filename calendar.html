@@ -394,7 +394,14 @@
   var REMIND = [[-1, "None"], [0, "At the start"], [10, "10 min"], [30, "30 min"], [60, "1 hr"], [120, "2 hr"], [1440, "1 day"]];
   var NAMES = ["Meeting", "Appointment", "Call", "Class", "Practice", "Birthday", "Take medicine"];
   function mineList() { try { return JSON.parse(localStorage.getItem("deckEvents") || "[]"); } catch (e) { return []; } }
-  function saveMine(list) { localStorage.setItem("deckEvents", JSON.stringify(list)); }
+  // returns false if it couldn't save. Storage full: drop the saved copies of the Google feeds (they download
+  // again) and try once more, so your own events always come first.
+  function saveMine(list) {
+    var text = JSON.stringify(list);
+    try { localStorage.setItem("deckEvents", text); return true; } catch (e) {}
+    for (var i = localStorage.length - 1; i >= 0; i--) { var k = localStorage.key(i); if (/^deckCal/.test(k)) localStorage.removeItem(k); }
+    try { localStorage.setItem("deckEvents", text); return true; } catch (e) { return false; }
+  }
   function remindText(m) {
     return m === 0 ? "Reminds you when it starts" : "Reminds you " + (m >= 1440 ? m / 1440 + " day" : m >= 60 ? m / 60 + " hr" : m + " min") + " before";
   }
@@ -456,12 +463,15 @@
     var list = mineList(), at = +startOf(), name = document.getElementById("sName").value.trim() || "Event";
     var e = { id: ed.id || String(Date.now()), title: name, at: at, remind: ed.remind, fired: ed.remind < 0 || at - ed.remind * 60000 <= Date.now() };  // a reminder time that's already gone never rings
     list = list.filter(function (x) { return x.id !== e.id; }).concat([e]).sort(function (a, b) { return a.at - b.at; });
-    saveMine(list);
+    if (!saveMine(list)) {  // keep the sheet open so nothing typed is lost
+      document.getElementById("sSum").innerHTML = "<b style='color:#ff6b6b'>Couldn’t save: the screen’s storage is full.</b><br>Delete some old events and try again.";
+      return;
+    }
     sel = new Date(ed.day); view = new Date(sel.getFullYear(), sel.getMonth(), 1);
     closeSheet(); rebuild();
   };
   document.getElementById("sDel").onclick = function () {
-    var id = ed.id; saveMine(mineList().filter(function (x) { return x.id !== id; })); closeSheet(); rebuild();
+    var id = ed.id; saveMine(mineList().filter(function (x) { return x.id !== id; })); closeSheet(); rebuild();  // deleting makes it smaller, so it saves
   };
   // a reminder rang on this page (alarm.js marked it): redraw so nothing is stale
   addEventListener("deckreminder", function () { if (!ed) rebuild(); });

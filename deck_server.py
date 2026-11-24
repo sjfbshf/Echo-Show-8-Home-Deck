@@ -106,22 +106,22 @@ NP_LOCK = threading.Lock()  # one command at a time, so two taps can't mix their
 ART = HERE / "nowplaying-art.bin"
 
 
-# Covers for songs Windows gives no picture for (Spotify read from its window title), found with Deezer's or
-# Apple's free search. Only the artist and song name are sent.
-# COVERS: {"artist|song": (cover number or 0, when last tried)}; COVER_IMG: {cover number: image}.
+# Covers and lengths for songs Windows knows nothing about (Spotify read from its window title), found with
+# Deezer's or Apple's free search. Only the artist and song name are sent.
+# SONGS: {"artist|song": {"no": cover number or 0, "len": seconds or 0, "tried": when}}; COVER_IMG: {cover number: image}.
 # The deck asks /art?v=<number>, so it always gets the picture that belongs to the song it shows.
-COVERS, COVER_IMG = {}, {}
+SONGS, COVER_IMG = {}, {}
 COVER_NO = iter(range(1000, 10**9))  # cover numbers from 1000 never clash with nowplaying.ps1's
 
 
-def find_cover(artist, title):
-    """The cover's number for the deck (0 = none yet). Searched in the background; a miss is tried again after 5 minutes."""
+def song_info(artist, title):
+    """What's known about this song so far. Searched in the background; a miss is tried again after 5 minutes."""
     key = f"{artist}|{title}"
-    no, tried = COVERS.get(key, (0, 0))
-    if not no and time.time() - tried > 300:
-        COVERS[key] = (0, time.time())
-        threading.Thread(target=fetch_cover, args=(key, artist, title), daemon=True).start()
-    return no
+    info = SONGS.get(key) or {"no": 0, "len": 0, "tried": 0}
+    if not info["no"] and time.time() - info["tried"] > 300:
+        info = SONGS[key] = {"no": 0, "len": 0, "tried": time.time()}
+        threading.Thread(target=fetch_song, args=(key, artist, title), daemon=True).start()
+    return info
 
 
 def plain(text):
@@ -136,39 +136,59 @@ def get_json(url):
         return json.load(r)
 
 
-def cover_url(artist, title):
-    """The cover of this exact song, or None. A wrong cover is worse than none, so names must match."""
+def look_up(artist, title):
+    """(cover address, length in seconds) of this exact song, or None. A wrong cover is worse than none, so names must match."""
     want, who = plain(title), plain(artist.split(",")[0])
     def same(t, a):
         return plain(t) == want and bool(who) and (who in plain(a) or plain(a) in who)
-    term = f"{artist.split(',')[0]} {title}"
-    # Deezer first (its catalogue is close to Spotify's), then Apple's iTunes search; both free with no key
-    for x in get_json("https://api.deezer.com/search?" + urlencode({"q": term, "limit": 10})).get("data", []):
-        if same(x.get("title", ""), x.get("artist", {}).get("name", "")) and x.get("album", {}).get("cover_xl"):
-            return x["album"]["cover_xl"]
-    for x in get_json("https://itunes.apple.com/search?" + urlencode({"term": term, "entity": "song", "limit": 10})).get("results", []):
-        if same(x.get("trackName", ""), x.get("artistName", "")) and x.get("artworkUrl100"):
-            return x["artworkUrl100"].replace("100x100bb", "600x600bb")
+    who_name = artist.split(",")[0]
+    short = re.sub(r"\s*[\(\[].*?[\)\]]", "", title).strip()  # searches often miss "Song (Lunch Break Freestyle)" but find "Song"
+    for term in dict.fromkeys([f"{who_name} {title}", f"{who_name} {short}"]):
+        # Deezer first (its catalogue is close to Spotify's), then Apple's iTunes search; both free with no key
+        for x in get_json("https://api.deezer.com/search?" + urlencode({"q": term, "limit": 10})).get("data", []):
+            if same(x.get("title", ""), x.get("artist", {}).get("name", "")) and x.get("album", {}).get("cover_xl"):
+                return x["album"]["cover_xl"], x.get("duration") or 0
+        for x in get_json("https://itunes.apple.com/search?" + urlencode({"term": term, "entity": "song", "limit": 10})).get("results", []):
+            if same(x.get("trackName", ""), x.get("artistName", "")) and x.get("artworkUrl100"):
+                return x["artworkUrl100"].replace("100x100bb", "600x600bb"), (x.get("trackTimeMillis") or 0) / 1000
     return None
 
 
-def fetch_cover(key, artist, title):
+def fetch_song(key, artist, title):
     try:
-        url = cover_url(artist, title)
-        if url:
-            with urllib.request.urlopen(url, timeout=10) as r:
+        found = look_up(artist, title)
+        if found:
+            with urllib.request.urlopen(found[0], timeout=10) as r:
                 img = r.read()
             no = next(COVER_NO)
             COVER_IMG[no] = img
-            COVERS[key] = (no, time.time())
+            SONGS[key] = {"no": no, "len": found[1], "tried": time.time()}
     except Exception as e:
         print(f"No cover found: {type(e).__name__}")
     if len(COVER_IMG) > 100:  # forget old songs' pictures
         for n in sorted(COVER_IMG)[:50]:
             COVER_IMG.pop(n, None)
-        for k, (n, _) in list(COVERS.items()):
-            if n and n not in COVER_IMG:
-                COVERS.pop(k, None)
+        for k, v in list(SONGS.items()):
+            if v["no"] and v["no"] not in COVER_IMG:
+                SONGS.pop(k, None)
+
+
+# Spotify read from its window title gives no position, so the helper keeps its own clock: time played since the
+# song first showed up, paused while Spotify is paused. It's an estimate: it can't see jumps made inside Spotify.
+CLOCK = {"key": None, "played": 0.0, "since": None, "paused_at": 0.0}
+
+
+def spotify_position(key, playing):
+    now = time.time()
+    if CLOCK["key"] != key and key is not None:
+        CLOCK.update(key=key, played=0.0, since=now if playing else None)
+    elif playing and CLOCK["since"] is None:
+        CLOCK["since"] = now
+    elif not playing and CLOCK["since"] is not None:
+        CLOCK["played"] += now - CLOCK["since"]; CLOCK["since"] = None; CLOCK["paused_at"] = now
+    if CLOCK["since"] is None and CLOCK["key"] and now - CLOCK["paused_at"] > 1800:
+        CLOCK["key"] = None  # paused for half an hour: start fresh next time
+    return CLOCK["played"] + (now - CLOCK["since"] if CLOCK["since"] is not None else 0)
 
 
 def now_playing_loop():
@@ -182,8 +202,14 @@ def now_playing_loop():
                     now = json.loads(line)
                 except ValueError:
                     continue
-                if now.get("keys"):  # Spotify read from its window title: Windows gives no cover, so look one up
-                    now["art"] = find_cover(now.get("artist", ""), now.get("title", ""))
+                if now.get("keys"):  # Spotify read from its window title: look up its cover and length, and keep time
+                    info = song_info(now.get("artist", ""), now.get("title", ""))
+                    pos = spotify_position(f"{now.get('artist')}|{now.get('title')}", True)
+                    if info["len"]:
+                        pos %= info["len"]  # on repeat, the same song starts over
+                    now.update(art=info["no"], length=round(info["len"], 1), position=round(pos, 1), estimated=True)
+                else:
+                    spotify_position(None, False)  # Spotify paused or gone: stop its clock
                 NOW = now  # swapped whole, so a request never sees half of it
             print("Now playing reader stopped; restarting it")
         except Exception as e:

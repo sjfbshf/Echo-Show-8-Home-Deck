@@ -112,7 +112,7 @@
   .prog { height: 5px; border-radius: 3px; background: rgba(160,190,230,.12); overflow: hidden; margin-top: 4px; }
   .prog i { display: block; height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, var(--accent), #ffd98a); transition: width .3s linear; }
   .times { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; margin-top: -2px; }
-  .media.idle .prog, .media.idle .times, .media.no-time .prog, .media.no-time .times { visibility: hidden; }
+  .idle .prog, .idle .times, .no-time .prog, .no-time .times { visibility: hidden; }
   .keys { display: flex; gap: 10px; margin-top: 2px; }
   .key[hidden] { display: none; }
   .keys .key { flex: 1; width: auto; }  /* the keys share the row, however many the app allows */
@@ -129,11 +129,41 @@
   .key.main { width: 78px; color: var(--accent); border-color: rgba(242,184,75,.35); }
   /* the progress line: tap it to jump there (when the app allows it) */
   .seekable { padding: 9px 0; margin: -9px 0; cursor: pointer; }
-  .media.can-seek .prog { height: 7px; }
+  .can-seek .prog { height: 7px; }
   .key.main .pause { display: none; }
-  .media.playing .key.main .pause { display: block; }
-  .media.playing .key.main .play { display: none; }
+  .playing .key.main .pause { display: block; }
+  .playing .key.main .play { display: none; }
   .key:active, .key.hit { transform: scale(.95); border-color: var(--accent); box-shadow: 0 0 24px -8px var(--accent); }
+  .media.on .art { cursor: pointer; }
+
+  /* full-screen player: tap the cover on the card. The cover grows out of the card into the middle,
+     its colours fill the background, and only the line and the keys sit under it. Tap Back or the background to return. */
+  .hud { position: absolute; inset: 0; z-index: 40; overflow: hidden; background: #05080d; opacity: 0; transition: opacity .35s ease; }
+  .hud[hidden] { display: none; }
+  .hud.open { opacity: 1; }
+  .hud-bg { position: absolute; inset: -80px; background: center / cover no-repeat; filter: blur(70px) saturate(1.5) brightness(.55); transform: scale(1.1); }
+  .hud-bg::after { content: ""; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 40%, transparent 30%, rgba(5,8,13,.85) 80%); }
+  .hud-back { position: absolute; left: 26px; top: 22px; z-index: 2; display: flex; align-items: center; gap: 10px; height: 60px; padding: 0 22px 0 16px;
+              border-radius: 18px; border: 1px solid var(--line); background: rgba(14,21,32,.55); color: var(--text); font: inherit; font-size: 18px; cursor: pointer; }
+  .hud-back svg { width: 26px; height: 26px; }
+  .hud-art { position: absolute; left: 410px; top: 54px; width: 460px; height: 460px; border-radius: 34px; overflow: hidden; z-index: 1;
+             background: linear-gradient(160deg, #1a2740, #0f1826); transform-origin: 0 0;
+             box-shadow: 0 40px 90px -30px #000, 0 0 0 1px rgba(255,255,255,.06); transition: filter .6s ease; }
+  .hud-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .5s ease; }
+  .hud.has-art .hud-art img { opacity: 1; }
+  .hud-art svg { position: absolute; left: 50%; top: 50%; width: 140px; height: 140px; margin: -70px; color: var(--dim); }
+  .hud:not(.playing) .hud-art { filter: saturate(.55) brightness(.8); }  /* paused: the cover goes quiet */
+  .hud.open .hud-art { transition: transform .55s cubic-bezier(.2,.8,.2,1), filter .6s ease; }
+  .hud-ctl { position: absolute; left: 300px; right: 300px; top: 556px; z-index: 1; display: flex; flex-direction: column; gap: 12px;
+             opacity: 0; transform: translateY(24px); transition: opacity .35s ease, transform .45s cubic-bezier(.2,.8,.2,1); }
+  .hud.open .hud-ctl { opacity: 1; transform: none; transition-delay: .18s; }
+  .hud .prog { height: 8px; border-radius: 4px; background: rgba(255,255,255,.14); }
+  .hud.can-seek .prog { height: 10px; }
+  .hud .times { font-size: 16px; color: rgba(238,242,248,.65); }
+  .hud .keys { gap: 16px; margin-top: 8px; }
+  .hud .key { height: 84px; border-radius: 24px; background: rgba(14,21,32,.55); border-color: rgba(255,255,255,.1); }
+  .hud .key svg { width: 40px; height: 40px; }
+  .hud .key.main { border-color: rgba(242,184,75,.5); }
 
   /* status badge in the gap between the trays; only shows when there is news */
   .status {
@@ -193,22 +223,40 @@
 
 <section class="panel media idle" id="media" aria-label="Playing on your PC">
   <div class="glow" id="glow"></div>
-  <div class="art"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><img id="art" alt=""></div>
+  <div class="art" id="cardArt" aria-label="Open the full-screen player"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><img class="np-img" alt=""></div>
   <div class="np">
     <div class="from"><span class="lv"><i></i><i></i><i></i></span><span id="npFrom">Your PC</span></div>
     <div class="title" id="npTitle">Nothing playing</div>
     <div class="who" id="npWho">Play something on your PC</div>
-    <div class="seekable" id="npSeek"><div class="prog"><i id="npBar"></i></div></div>
-    <div class="times"><span id="npAt">0:00</span><span id="npLeft">0:00</span></div>
+    <div class="seekable np-seek"><div class="prog"><i class="np-bar"></i></div></div>
+    <div class="times"><span class="np-at">0:00</span><span class="np-left">0:00</span></div>
     <div class="keys">
-      <button class="key" id="npPrev" aria-label="Previous track"><svg viewBox="0 0 24 24"><path class="solid" d="M18 6v12l-9-6z"/><path d="M6 6v12"/></svg></button>
-      <button class="key" id="npBack" aria-label="Back 10 seconds"><svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.6-5.7"/><path d="M6.5 2.5v4h4"/><text x="12.6" y="15.4">10</text></svg></button>
+      <button class="key k-prev" aria-label="Previous track"><svg viewBox="0 0 24 24"><path class="solid" d="M18 6v12l-9-6z"/><path d="M6 6v12"/></svg></button>
+      <button class="key k-back" aria-label="Back 10 seconds"><svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.6-5.7"/><path d="M6.5 2.5v4h4"/><text x="12.6" y="15.4">10</text></svg></button>
       <button class="key main" data-key="play" aria-label="Play or pause"><svg class="play" viewBox="0 0 24 24"><path class="solid" d="M7 4.5v15l12-7.5z"/></svg><svg class="pause" viewBox="0 0 24 24"><path class="solid" d="M6 4.5h4v15H6zM14 4.5h4v15h-4z"/></svg></button>
-      <button class="key" id="npFwd" aria-label="Forward 10 seconds"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.6-5.7"/><path d="M17.5 2.5v4h-4"/><text x="11.4" y="15.4">10</text></svg></button>
-      <button class="key" id="npNext" aria-label="Next track"><svg viewBox="0 0 24 24"><path class="solid" d="M6 6v12l9-6z"/><path d="M18 6v12"/></svg></button>
+      <button class="key k-fwd" aria-label="Forward 10 seconds"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.6-5.7"/><path d="M17.5 2.5v4h-4"/><text x="11.4" y="15.4">10</text></svg></button>
+      <button class="key k-next" aria-label="Next track"><svg viewBox="0 0 24 24"><path class="solid" d="M6 6v12l9-6z"/><path d="M18 6v12"/></svg></button>
     </div>
   </div>
 </section>
+
+<!-- the full-screen player (tap the cover on the card) -->
+<div class="hud idle" id="hud" hidden>
+  <div class="hud-bg" id="hudBg"></div>
+  <button class="hud-back" id="hudBack" aria-label="Back to deck"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>Back</button>
+  <div class="hud-art" id="hudArt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><img class="np-img" alt=""></div>
+  <div class="hud-ctl">
+    <div class="seekable np-seek"><div class="prog"><i class="np-bar"></i></div></div>
+    <div class="times"><span class="np-at">0:00</span><span class="np-left">0:00</span></div>
+    <div class="keys">
+      <button class="key k-prev" aria-label="Previous track"><svg viewBox="0 0 24 24"><path class="solid" d="M18 6v12l-9-6z"/><path d="M6 6v12"/></svg></button>
+      <button class="key k-back" aria-label="Back 10 seconds"><svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.6-5.7"/><path d="M6.5 2.5v4h4"/><text x="12.6" y="15.4">10</text></svg></button>
+      <button class="key main" data-key="play" aria-label="Play or pause"><svg class="play" viewBox="0 0 24 24"><path class="solid" d="M7 4.5v15l12-7.5z"/></svg><svg class="pause" viewBox="0 0 24 24"><path class="solid" d="M6 4.5h4v15H6zM14 4.5h4v15h-4z"/></svg></button>
+      <button class="key k-fwd" aria-label="Forward 10 seconds"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.6-5.7"/><path d="M17.5 2.5v4h-4"/><text x="11.4" y="15.4">10</text></svg></button>
+      <button class="key k-next" aria-label="Next track"><svg viewBox="0 0 24 24"><path class="solid" d="M6 6v12l9-6z"/><path d="M18 6v12"/></svg></button>
+    </div>
+  </div>
+</div>
 
 <div class="status" id="status" role="status"></div>
 
@@ -287,42 +335,41 @@
     for (var k in known) if (low.indexOf(k) >= 0) return known[k];
     return (id || "Your PC").split(/[.!_]/)[0];
   }
+  var hud = document.getElementById("hud"), PANES = [mediaEl, hud];
+  function each(sel, f) { Array.prototype.forEach.call(document.querySelectorAll(sel), f); }
   function drawNow() {
-    var n = NP, on = n && n.title;
-    mediaEl.classList.toggle("idle", !on);
-    mediaEl.classList.toggle("playing", !!(on && n.playing));
+    var n = NP, on = !!(n && n.title), timed = on && n.length > 0;
+    PANES.forEach(function (p) {
+      p.classList.toggle("idle", !on);
+      p.classList.toggle("on", on);
+      p.classList.toggle("playing", !!(on && n.playing));
+      p.classList.toggle("can-seek", !!(timed && n.seek));
+      p.classList.toggle("no-time", on && !timed && !!n.keys);  // Spotify whose length wasn't found
+    });
     document.getElementById("npTitle").textContent = on ? n.title : "Nothing playing";
     document.getElementById("npWho").textContent = on ? (n.artist || n.album || " ") : "Play something on your PC";
     document.getElementById("npFrom").textContent = on ? appName(n.app) + (n.playing ? "" : " · paused") : "Your PC";
-    if (on && n.length > 0) {
-      var at = Math.min(n.length, n.position + (n.playing ? (Date.now() - npAt) / 1000 : 0));
-      document.getElementById("npBar").style.width = (at / n.length * 100) + "%";
-      document.getElementById("npAt").textContent = mmss(at);
-      document.getElementById("npLeft").textContent = "-" + mmss(n.length - at);
-    } else if (on && n.keys) {  // Spotify read from its window title: no times
-      document.getElementById("npBar").style.width = "0";
-      document.getElementById("npAt").textContent = document.getElementById("npLeft").textContent = "";
-    } else if (on) {  // live streams and some apps don't say how long
-      document.getElementById("npBar").style.width = "0";
-      document.getElementById("npAt").textContent = n.playing ? "Live" : "";
-      document.getElementById("npLeft").textContent = "";
-    }
+    var at = timed ? Math.min(n.length, n.position + (n.playing ? (Date.now() - npAt) / 1000 : 0)) : 0;
+    each(".np-bar", function (b) { b.style.width = timed ? (at / n.length * 100) + "%" : "0"; });
+    // Spotify's times are the helper's own estimate (it can't see jumps made in Spotify), so they get a "~"
+    each(".np-at", function (t) { t.textContent = timed ? (n.estimated ? "~" : "") + mmss(at) : on && n.playing && !n.keys ? "Live" : ""; });
+    each(".np-left", function (t) { t.textContent = timed ? "-" + mmss(n.length - at) : ""; });
     // only the keys the app supports: YouTube has no next/previous outside a playlist, but lets you jump around
-    document.getElementById("npPrev").hidden = !(on && n.prev);
-    document.getElementById("npNext").hidden = !(on && n.next);
-    var seek = !!(on && n.seek && n.length > 0);
-    document.getElementById("npBack").hidden = document.getElementById("npFwd").hidden = !seek;
-    mediaEl.classList.toggle("can-seek", seek);
-    mediaEl.classList.toggle("no-time", !!(on && n.keys));
+    each(".k-prev", function (b) { b.hidden = !(on && n.prev); });
+    each(".k-next", function (b) { b.hidden = !(on && n.next); });
+    each(".k-back, .k-fwd", function (b) { b.hidden = !(timed && n.seek); });
     var art = on ? n.art : 0;
     if (art !== npArt) {
       npArt = art;
       var src = art ? DECK.pc + "/art?k=" + encodeURIComponent(DECK.key) + "&v=" + art : "";
-      mediaEl.classList.remove("has-art");
-      var img = document.getElementById("art");
-      if (src) { img.onload = function () { mediaEl.classList.add("has-art"); }; img.src = src; document.getElementById("glow").style.backgroundImage = "url('" + src + "')"; }
-      else img.removeAttribute("src");
+      PANES.forEach(function (p) { p.classList.remove("has-art"); });
+      each(".np-img", function (img) {
+        if (src) { img.onload = function () { PANES.forEach(function (p) { p.classList.add("has-art"); }); }; img.src = src; }
+        else img.removeAttribute("src");
+      });
+      document.getElementById("glow").style.backgroundImage = document.getElementById("hudBg").style.backgroundImage = src ? "url('" + src + "')" : "";
     }
+    if (!on && !hud.hidden) closeHud();  // nothing playing any more: back to the deck
   }
   function loadNow() {
     if (document.hidden) return;
@@ -332,7 +379,6 @@
       .then(function (n) { NP = n; npAt = Date.now(); drawNow(); })
       .catch(function () { NP = null; drawNow(); });  // PC off or asleep: show "Nothing playing"
   }
-  loadNow(); setInterval(loadNow, 1000); setInterval(drawNow, 250);
   // skip and jump: sent to the PC helper, which passes them to Windows' media controls
   function npSend(path) {
     var stop = new AbortController(); setTimeout(function () { stop.abort(); }, 4000);
@@ -345,23 +391,49 @@
     NP.position = t; npAt = Date.now(); drawNow();
     npSend("/np/seek?to=" + t.toFixed(1));
   }
-  document.getElementById("npBack").onclick = function () { jumpTo(npNow() - 10); };
-  document.getElementById("npFwd").onclick = function () { jumpTo(npNow() + 10); };
+  each(".k-back", function (b) { b.onclick = function () { jumpTo(npNow() - 10); }; });
+  each(".k-fwd", function (b) { b.onclick = function () { jumpTo(npNow() + 10); }; });
   // Spotify read from its window title ("keys") is skipped with the PC's media keys; the rest through Windows' media list
-  document.getElementById("npPrev").onclick = function () { npSend(NP && NP.keys ? "/key/prev" : "/np/prev"); };
-  document.getElementById("npNext").onclick = function () { npSend(NP && NP.keys ? "/key/next" : "/np/next"); };
-  document.getElementById("npSeek").onclick = function (e) {
-    var bar = this.querySelector(".prog"), r = bar.getBoundingClientRect();
-    if (NP && NP.length > 0) jumpTo((e.clientX - r.left) / r.width * NP.length);
-  };
-  ["npBack", "npFwd", "npPrev", "npNext"].forEach(function (id) {
-    var b = document.getElementById(id);
+  each(".k-prev", function (b) { b.onclick = function () { npSend(NP && NP.keys ? "/key/prev" : "/np/prev"); }; });
+  each(".k-next", function (b) { b.onclick = function () { npSend(NP && NP.keys ? "/key/next" : "/np/next"); }; });
+  each(".np-seek", function (el) {
+    el.onclick = function (e) {
+      var r = el.querySelector(".prog").getBoundingClientRect();
+      if (NP && NP.seek && NP.length > 0) jumpTo((e.clientX - r.left) / r.width * NP.length);
+    };
+  });
+  each(".k-prev, .k-back, .k-fwd, .k-next", function (b) {
     b.addEventListener("pointerdown", function () { b.classList.add("hit"); });
     ["pointerup", "pointerleave", "pointercancel"].forEach(function (ev) { b.addEventListener(ev, function () { b.classList.remove("hit"); }); });
   });
-
   // tapping play/pause flips the button straight away; the next ask confirms it
-  document.querySelector(".key.main").addEventListener("click", function () { if (NP && NP.title) { NP.position += NP.playing ? (Date.now() - npAt) / 1000 : 0; npAt = Date.now(); NP.playing = !NP.playing; drawNow(); } });
+  each(".key.main", function (b) {
+    b.addEventListener("click", function () { if (NP && NP.title) { NP.position = npNow(); npAt = Date.now(); NP.playing = !NP.playing; drawNow(); } });
+  });
+
+  // the full-screen player. The big cover starts exactly over the small one and grows into place.
+  function spot(el) { var x = 0, y = 0; for (; el && el !== document.body; el = el.offsetParent) { x += el.offsetLeft; y += el.offsetTop; } return { x: x, y: y, w: 0 }; }
+  function fromCard() {  // the transform that puts the big cover over the card's cover
+    var a = document.getElementById("cardArt"), b = document.getElementById("hudArt"), p = spot(a), q = spot(b);
+    return "translate(" + (p.x - q.x) + "px," + (p.y - q.y) + "px) scale(" + a.offsetWidth / b.offsetWidth + ")";
+  }
+  function openHud() {
+    if (!NP || !NP.title || !hud.hidden) return;
+    var big = document.getElementById("hudArt");
+    hud.hidden = false; big.style.transform = fromCard();
+    void hud.offsetWidth;  // lay it out at the card's spot first, so the growing is animated
+    hud.classList.add("open"); big.style.transform = "";
+  }
+  function closeHud() {
+    if (hud.hidden) return;
+    var big = document.getElementById("hudArt");
+    hud.classList.remove("open"); big.style.transition = "transform .45s cubic-bezier(.4,0,.2,1), filter .6s ease"; big.style.transform = fromCard();
+    setTimeout(function () { hud.hidden = true; big.style.transition = ""; big.style.transform = ""; }, 420);
+  }
+  document.getElementById("cardArt").onclick = openHud;
+  document.getElementById("hudBack").onclick = closeHud;
+  hud.addEventListener("click", function (e) { if (e.target === hud || e.target === document.getElementById("hudBg")) closeHud(); });
+  loadNow(); setInterval(loadNow, 1000); setInterval(drawNow, 250);
 
   // The deck is designed at 1280x800; shrink it to fit screens that report fewer CSS pixels (the Echo reports ~853x533).
   function fit() {

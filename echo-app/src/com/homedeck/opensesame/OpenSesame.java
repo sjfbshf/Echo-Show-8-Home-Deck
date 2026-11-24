@@ -42,7 +42,8 @@ public class OpenSesame extends AccessibilityService {
         if (root == null) root = getRootInActiveWindow();
         if (root == null) return;
         scan(root, 0);
-        if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, "drawer=" + drawer + " top=" + topId + " text=" + topText);
+        // debug log: whether the newest request is "open sesame", never what you actually said to Alexa
+        if (Log.isLoggable(TAG, Log.DEBUG)) Log.d(TAG, "drawer=" + drawer + " top=" + topId + " match=" + (topText != null && PHRASE.matcher(topText).matches()));
         long now = SystemClock.uptimeMillis();
         if (drawer && now < closeUntil && dismiss != null && now - lastClose > 300) {
             lastClose = now;
