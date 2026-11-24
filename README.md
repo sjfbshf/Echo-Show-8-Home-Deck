@@ -4,7 +4,7 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
 
 ![The deck](docs/deck.png)
 
-- **Top left: apps on the screen itself.** Weather, a timer and alarm (flick-to-pick time wheels), your calendar, and Google. These work even when your PC is off.
+- **Top left: apps on the screen itself.** Weather, a timer and alarm (flick-to-pick time wheels), a calendar where you can add events with reminders, and Google. These work even when your PC is off.
 - **Top right: apps on your PC.** One tap opens Claude, ChatGPT, Terminal, Obsidian, or anything else you list.
 - **Middle: Claude usage.** Your 5-hour and weekly Claude plan usage, and when each one resets. This is optional.
 - **Bottom: a clock and PC media keys.** Play/pause, next and previous, and volume.
@@ -13,6 +13,10 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
 | Weather | Calendar | Timer & alarm |
 |---|---|---|
 | ![Weather](docs/weather.png) | ![Calendar](docs/calendar.png) | ![Timer](docs/timer.png) |
+
+| Adding an event with a reminder | Google |
+|---|---|
+| ![Adding an event](docs/calendar-event.png) | ![Google](docs/google.png) |
 
 ## What you need
 
@@ -52,6 +56,22 @@ Run `sync_echo.py` again whenever you edit a page, `pads.json` or `settings.json
 3. Paste it into `"calendars"` in `settings.json`, then run `sync_echo.py`.
 
 Keep that address private: anyone who has it can read the calendar. If it leaks, press **Reset** next to it in Google Calendar.
+
+### Adding your own events and reminders
+
+Tap a day on the calendar, then **Add**.
+
+- **Name it:** type a name with the screen's keyboard, or tap a ready-made one like Meeting or Call.
+- **Pick the day and time:** use the arrows to change the day, and flick the wheels to set the time (in 5-minute steps).
+- **Choose when to be reminded:** at the start, or 10 min, 30 min, 1 hr, 2 hr or 1 day before.
+- **Change or delete it later:** tap the event in the list on the right.
+
+When the reminder time comes, whichever deck page is open beeps and shows the event's name and time. Tap the screen to stop it. It beeps for up to 2 minutes, then waits quietly until you tap.
+
+Some limits:
+
+- **Saved on the screen only.** These events stay on the tablet and don't appear in Google Calendar.
+- **Only rings on a deck page.** A reminder can't ring while Google or another app is open. If you come back to the deck within 10 minutes, it still rings.
 
 ### Claude usage (optional)
 

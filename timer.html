@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Timer and alarm</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;500;650&display=swap" rel="stylesheet">
+<script src="wheel.js"></script>
 <style>
   /* Timer and alarm on the Echo. Flick the wheels to pick a time, or tap a quick start.
      The state lives in alarm.js, so both keep running and ringing on the deck. */
@@ -139,39 +140,6 @@
   function short(sec) { var t = hms(sec); return (t[0] ? t[0] + ":" + two(t[1]) : t[1]) + ":" + two(t[2]); }
   function words(sec) { var t = hms(sec), p = []; if (t[0]) p.push(t[0] + " hr"); if (t[1]) p.push(t[1] + " min"); if (t[2] || !p.length) p.push(t[2] + " sec"); return p.join(" "); }
 
-  // A wheel: a snapping scroll list. Flick it, or tap a number to bring it to the middle.
-  // onPick runs once it settles. set() moves it without calling onPick.
-  function Wheel(box, labels, onPick) {
-    var H = 76, rows = [], settle, busy = false, value = 0;
-    function pad() { var d = document.createElement("div"); box.appendChild(d); }
-    pad(); pad();
-    labels.forEach(function (t, i) {
-      var d = document.createElement("div"); d.textContent = t;
-      d.onclick = function () { box.scrollTo({ top: i * H, behavior: "smooth" }); };
-      box.appendChild(d); rows.push(d);
-    });
-    pad(); pad();
-    function at() { return Math.max(0, Math.min(rows.length - 1, Math.round(box.scrollTop / H))); }
-    function paint() {
-      var i = at();
-      rows.forEach(function (r, n) { r.className = n === i ? "mid" : Math.abs(n - i) === 1 ? "near" : ""; });
-    }
-    box.addEventListener("scroll", function () {
-      busy = true; paint();
-      clearTimeout(settle);
-      settle = setTimeout(function () {
-        var i = at();
-        if (Math.abs(box.scrollTop - i * H) > 1) box.scrollTo({ top: i * H, behavior: "smooth" });  // in case snapping isn't supported
-        busy = false;
-        if (i !== value) { value = i; onPick(i); }
-      }, 160);
-    }, { passive: true });
-    box.addEventListener("touchstart", function () { busy = true; }, { passive: true });
-    return {
-      set: function (i) { if (busy) return; value = i; box.scrollTop = i * H; paint(); },
-      get busy() { return busy; }
-    };
-  }
   function range(n, f) { var a = []; for (var i = 0; i < n; i++) a.push(f ? f(i) : two(i)); return a; }
 
   function init() {
