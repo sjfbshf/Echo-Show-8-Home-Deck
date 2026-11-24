@@ -87,16 +87,23 @@
     var list, due = [], changed = false;
     try { list = JSON.parse(localStorage.getItem("deckEvents") || "[]"); } catch (e) { return; }
     list.forEach(function (e) {
-      if (e.fired || e.remind < 0) return;
+      if (e.fired || e.remind == null || e.remind === -1) return;  // -1 = no reminder
       var at = e.at - e.remind * 60000;
       if (now < at) return;
       e.fired = true; changed = true;
-      if (now - at < 10 * 60000 && (e.remind === 0 || now < e.at)) due.push(e);
+      // rings if it's under 10 minutes late, and (for timed events) before the event starts. All-day reminders can
+      // fall after midnight ("morning of"), so those only need to be on time.
+      if (now - at < 10 * 60000 && (e.remind <= 0 || e.allDay || now < e.at)) due.push(e);
     });
     if (!changed) return;
     try { localStorage.setItem("deckEvents", JSON.stringify(list)); } catch (e) {}
     due.forEach(function (due) {  // every reminder that's due rings, one after another
       var start = new Date(due.at), mins = Math.round((due.at - now) / 60000);
+      if (due.allDay) {  // "Today · all day" or "Tomorrow · all day"
+        var days = Math.round((new Date(start).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 86400000);
+        ring({ title: due.title, sub: (days === 0 ? "Today" : days === 1 ? "Tomorrow" : start.toLocaleDateString([], { weekday: "long" })) + " · all day" });
+        return;
+      }
       var when = (start.toDateString() === new Date(now).toDateString() ? "" : start.toLocaleDateString([], { weekday: "long" }) + " ") +
         start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
       ring({ title: due.title, sub: mins > 0 ? when + " · in " + (mins >= 60 ? Math.floor(mins / 60) + " hr" + (mins % 60 ? " " + mins % 60 + " min" : "") : mins + " min") : "Starting now · " + when });

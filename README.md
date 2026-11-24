@@ -66,8 +66,8 @@ Keep that address private: anyone who has it can read the calendar. If it leaks,
 Tap a day on the calendar, then **Add**.
 
 - **Name it:** type a name with the screen's keyboard, or tap a ready-made one like Meeting or Call.
-- **Pick the day and time:** use the arrows to change the day, and flick the wheels to set the time (in 5-minute steps).
-- **Choose when to be reminded:** at the start, or 10 min, 30 min, 1 hr, 2 hr or 1 day before.
+- **Pick the day and time:** use the arrows to change the day, and flick the wheels to set the time (in 5-minute steps). Tap **All day** for things like birthdays.
+- **Choose when to be reminded:** at the start, or 10 min, 30 min, 1 hr, 2 hr or 1 day before. All-day events are reminded at 9 AM that morning or 9 AM the day before.
 - **Change or delete it later:** tap the event in the list on the right.
 
 When the reminder time comes, whichever deck page is open beeps and shows the event's name and time. Tap the screen to stop it. It beeps for up to 2 minutes, then waits quietly until you tap.

@@ -103,6 +103,13 @@
   .space { flex: 1; }
   .sum { font-size: 17px; color: var(--dim); line-height: 1.45; }
   .sum b { color: var(--text); font-weight: 500; }
+  .trow { display: flex; align-items: center; justify-content: space-between; }
+  .allday { height: 46px; padding: 0 18px; border-radius: 14px; font-size: 17px; border: 1px solid var(--line); background: #121b28; color: #cdd5e2; }
+  .allday.on { color: var(--accent); border-color: rgba(242,184,75,.6); background: rgba(242,184,75,.1); }
+  .allday:active { transform: scale(.96); }
+  .allnote { display: none; flex: 1; align-items: center; justify-content: center; font-size: 30px; font-weight: 300; color: var(--dim); }
+  .is-allday .allnote { display: flex; }
+  .is-allday .wheels { display: none; }
   .remind { grid-column: 1 / 3; display: flex; align-items: center; gap: 16px; border-top: 1px solid var(--line); padding-top: 16px; }
   .remind .label { flex: none; }
 
@@ -175,8 +182,9 @@
         <div class="sum" id="sSum"></div>
       </div>
       <div class="col">
-        <div class="label">Time</div>
-        <div class="wheels"><div class="band"></div>
+        <div class="trow"><div class="label">Time</div><button class="allday" id="sAllDay">All day</button></div>
+        <div class="allnote" id="sAllNote">Lasts the whole day</div>
+        <div class="wheels" id="sWheels"><div class="band"></div>
           <div class="wheel" id="eH"></div><div class="colon">:</div>
           <div class="wheel" id="eM"></div>
           <div class="wheel ampm" id="eP"></div>
@@ -383,7 +391,7 @@
         var s = row.appendChild(el("span", "s", o.ev.title || "(busy)"));
         if (o.ev.own) {  // your own events: tap to change; shows when it reminds you
           var r = o.ev.own.remind;
-          if (r >= 0) { var sm = s.appendChild(el("small")); sm.innerHTML = BELL; sm.appendChild(document.createTextNode(remindText(r))); }
+          if (!noReminder(r)) { var sm = s.appendChild(el("small")); sm.innerHTML = BELL; sm.appendChild(document.createTextNode(remindText(r, o.ev.own.allDay))); }
           row.onclick = (function (e) { return function () { openSheet(e); }; })(o.ev.own);
         }
         box.appendChild(row);
@@ -422,15 +430,19 @@
       var t = localStorage.getItem(slot(f.url));
       try { if (t) EVENTS = EVENTS.concat(parseICS(t, f.c)); } catch (x) {}  // an unreadable feed is skipped, not fatal
     });
-    mineList().forEach(function (e) { EVENTS.push({ title: e.title, start: new Date(e.at), c: "#f2b84b", ex: [], skip: {}, own: e }); });
+    mineList().forEach(function (e) { EVENTS.push({ title: e.title, start: new Date(e.at), allDay: !!e.allDay, c: "#f2b84b", ex: [], skip: {}, own: e }); });
     draw();
   }
 
   // ---------- your own events (kept on the Echo in localStorage "deckEvents") ----------
-  // each is { id, title, at: start time in ms, remind: minutes before (-1 = no reminder), fired }
+  // each is { id, title, at: start time in ms (midnight for all-day), allDay, remind: minutes before (-1 = none), fired }
   // alarm.js reads the same list and rings each reminder once, on whichever deck page is open
   var BELL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></svg>';
   var REMIND = [[-1, "None"], [0, "At the start"], [10, "10 min"], [30, "30 min"], [60, "1 hr"], [120, "2 hr"], [1440, "1 day"]];
+  // all-day events start at midnight, so their reminders are set from there: -540 min = 9 AM that morning,
+  // 900 min = 9 AM the day before
+  var REMIND_DAY = [[-1, "None"], [-540, "Morning of (9 AM)"], [900, "Day before (9 AM)"]];
+  function noReminder(m) { return m == null || m === -1; }
   var NAMES = ["Meeting", "Appointment", "Call", "Class", "Practice", "Birthday", "Take medicine"];
   function mineList() { try { return JSON.parse(localStorage.getItem("deckEvents") || "[]"); } catch (e) { return []; } }
   // returns false if it couldn't save. Storage full: drop the saved copies of the Google feeds (they download
@@ -441,11 +453,12 @@
     for (var i = localStorage.length - 1; i >= 0; i--) { var k = localStorage.key(i); if (/^deckCal/.test(k)) localStorage.removeItem(k); }
     try { localStorage.setItem("deckEvents", text); return true; } catch (e) { return false; }
   }
-  function remindText(m) {
+  function remindText(m, allDay) {
+    if (allDay) return m === -540 ? "Reminds you that morning at 9 AM" : "Reminds you the day before at 9 AM";
     return m === 0 ? "Reminds you when it starts" : "Reminds you " + (m >= 1440 ? m / 1440 + " day" : m >= 60 ? m / 60 + " hr" : m + " min") + " before";
   }
 
-  var ed = null;  // the event being edited: { id, title, day (Date), min (minutes after midnight), remind }
+  var ed = null;  // the event being edited: { id, title, day (Date), min (minutes after midnight), allDay, remind }
   var eH = Wheel(document.getElementById("eH"), range(12, function (i) { return String(i + 1); }), function (i) { var h = Math.floor(ed.min / 60); ed.min = ((i + 1) % 12 + (h >= 12 ? 12 : 0)) * 60 + ed.min % 60; drawSheet(); }, 62);
   var eM = Wheel(document.getElementById("eM"), range(12, function (i) { return ("0" + i * 5).slice(-2); }), function (i) { ed.min = Math.floor(ed.min / 60) * 60 + i * 5; drawSheet(); }, 62);
   var eP = Wheel(document.getElementById("eP"), ["AM", "PM"], function (i) { var h = Math.floor(ed.min / 60) % 12; ed.min = (h + (i ? 12 : 0)) * 60 + ed.min % 60; drawSheet(); }, 62);
@@ -456,39 +469,53 @@
     b.onclick = function () { document.getElementById("sName").value = n; drawSheet(); };
     document.getElementById("sNames").appendChild(b);
   });
-  REMIND.forEach(function (r) {
-    var b = el("button", "", r[1] + (r[0] > 0 ? " before" : ""));
-    b.dataset.m = r[0];
-    b.onclick = function () { ed.remind = r[0]; drawSheet(); };
-    document.getElementById("sRemind").appendChild(b);
-  });
+  function remindChips() {  // the reminder choices for a timed or an all-day event
+    var box = document.getElementById("sRemind"); box.innerHTML = "";
+    (ed.allDay ? REMIND_DAY : REMIND).forEach(function (r) {
+      var b = el("button", "", r[1] + (!ed.allDay && r[0] > 0 ? " before" : ""));
+      b.dataset.m = r[0];
+      b.onclick = function () { ed.remind = r[0]; drawSheet(); };
+      box.appendChild(b);
+    });
+  }
+  document.getElementById("sAllDay").onclick = function () {
+    ed.allDay = !ed.allDay;
+    ed.remind = ed.allDay ? -540 : 60;  // sensible reminder for each kind
+    remindChips(); drawSheet();
+  };
 
   function openSheet(e) {  // e = one of your events, or nothing for a new one on the chosen day
-    if (e) { var at = new Date(e.at); ed = { id: e.id, rang: e.fired && e.remind >= 0, day: new Date(at.getFullYear(), at.getMonth(), at.getDate()), min: at.getHours() * 60 + at.getMinutes(), remind: e.remind }; }
+    if (e) { var at = new Date(e.at); ed = { id: e.id, rang: e.fired && !noReminder(e.remind), allDay: !!e.allDay, day: new Date(at.getFullYear(), at.getMonth(), at.getDate()), min: e.allDay ? 9 * 60 : at.getHours() * 60 + at.getMinutes(), remind: e.remind }; }
     else {
       var now = new Date(), next = Math.min(23 * 60 + 55, Math.ceil((now.getHours() * 60 + now.getMinutes() + 1) / 30) * 30);  // next half hour
-      ed = { id: null, day: new Date(sel), min: same(sel, today) ? next : 9 * 60, remind: 60 };
+      ed = { id: null, allDay: false, day: new Date(sel), min: same(sel, today) ? next : 9 * 60, remind: 60 };
     }
     document.getElementById("sName").value = e ? e.title : "";
     document.getElementById("sTitle").textContent = e ? "Change event" : "New event";
     document.getElementById("sDel").hidden = !e;
     document.getElementById("sheet").hidden = false;
+    remindChips();
     var h = Math.floor(ed.min / 60);
     eH.set((h % 12 || 12) - 1); eM.set(Math.round(ed.min % 60 / 5) % 12); eP.set(h >= 12 ? 1 : 0);
     drawSheet();
   }
-  function startOf() { return new Date(ed.day.getFullYear(), ed.day.getMonth(), ed.day.getDate(), Math.floor(ed.min / 60), ed.min % 60); }
+  function startOf() {  // all-day events start at midnight
+    return ed.allDay ? new Date(ed.day.getFullYear(), ed.day.getMonth(), ed.day.getDate())
+      : new Date(ed.day.getFullYear(), ed.day.getMonth(), ed.day.getDate(), Math.floor(ed.min / 60), ed.min % 60);
+  }
   function drawSheet() {
     var diff = Math.round((ed.day - today) / DAY), at = startOf();
     document.getElementById("sDay").innerHTML = "<b>" + (diff === 0 ? "Today" : diff === 1 ? "Tomorrow" : diff === -1 ? "Yesterday" : at.toLocaleDateString([], { weekday: "long" })) + "</b>" +
       at.toLocaleDateString([], { month: "long", day: "numeric", year: at.getFullYear() === today.getFullYear() ? undefined : "numeric" });
     var name = document.getElementById("sName").value.trim();
+    document.querySelector(".box").classList.toggle("is-allday", ed.allDay);
+    document.getElementById("sAllDay").classList.toggle("on", ed.allDay);
     Array.prototype.forEach.call(document.querySelectorAll("#sNames button"), function (b) { b.classList.toggle("on", b.textContent === name); });
     Array.prototype.forEach.call(document.querySelectorAll("#sRemind button"), function (b) { b.classList.toggle("on", +b.dataset.m === ed.remind); });
-    var when = at.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + " at " + time(at), ring = new Date(+at - ed.remind * 60000);
+    var when = at.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + (ed.allDay ? " · all day" : " at " + time(at)), ring = new Date(+at - ed.remind * 60000);
     document.getElementById("sSum").innerHTML = "<b>" + (name ? esc(name) : "Your event") + "</b> · " + when + "<br>" +
-      (ed.remind < 0 ? "No reminder" : +ring <= Date.now() ? (ed.rang ? "Already reminded you" : "That reminder time has already passed, so it won't ring")
-        : "The deck rings " + (ring.toDateString() === at.toDateString() ? "at " + time(ring) : ring.toLocaleDateString([], { weekday: "short" }) + " at " + time(ring)) + (ed.remind ? ", " + REMIND.filter(function (r) { return r[0] === ed.remind; })[0][1] + " before" : ""));
+      (noReminder(ed.remind) ? "No reminder" : +ring <= Date.now() ? (ed.rang ? "Already reminded you" : "That reminder time has already passed, so it won't ring")
+        : "The deck rings " + (ring.toDateString() === at.toDateString() ? "at " + time(ring) : ring.toLocaleDateString([], { weekday: "short" }) + " at " + time(ring)) + (ed.remind > 0 && !ed.allDay ? ", " + REMIND.filter(function (r) { return r[0] === ed.remind; })[0][1] + " before" : ""));
   }
   function esc(t) { return t.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function closeSheet() { eH.cancel(); eM.cancel(); eP.cancel(); document.getElementById("sheet").hidden = true; document.getElementById("sName").blur(); ed = null; }
@@ -498,9 +525,10 @@
   document.getElementById("sPrev").onclick = function () { ed.day = new Date(ed.day.getFullYear(), ed.day.getMonth(), ed.day.getDate() - 1); drawSheet(); };
   document.getElementById("sNext").onclick = function () { ed.day = new Date(ed.day.getFullYear(), ed.day.getMonth(), ed.day.getDate() + 1); drawSheet(); };
   document.getElementById("sSave").onclick = function () {
-    eH.commit(); eM.commit(); eP.commit();  // take what the wheels show right now
+    if (!ed.allDay) { eH.commit(); eM.commit(); eP.commit(); }  // take what the wheels show right now
     var list = mineList(), at = +startOf(), name = document.getElementById("sName").value.trim() || "Event";
-    var e = { id: ed.id || String(Date.now()), title: name, at: at, remind: ed.remind, fired: ed.remind < 0 || at - ed.remind * 60000 <= Date.now() };  // a reminder time that's already gone never rings
+    var e = { id: ed.id || String(Date.now()), title: name, at: at, allDay: ed.allDay, remind: ed.remind,
+              fired: noReminder(ed.remind) || at - ed.remind * 60000 <= Date.now() };  // a reminder time that's already gone never rings
     list = list.filter(function (x) { return x.id !== e.id; }).concat([e]).sort(function (a, b) { return a.at - b.at; });
     if (!saveMine(list)) {  // keep the sheet open so nothing typed is lost
       document.getElementById("sSum").innerHTML = "<b style='color:#ff6b6b'>Couldn’t save: the screen’s storage is full.</b><br>Delete some old events and try again.";

@@ -137,8 +137,8 @@
   var placeEl = document.getElementById("place"), labelEl = document.createElement("span");
   placeEl.textContent = W.place || ""; labelEl.textContent = W.label || ""; placeEl.appendChild(labelEl);
   var API = "https://api.open-meteo.com/v1/forecast?latitude=" + W.latitude + "&longitude=" + W.longitude +
-    "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,relative_humidity_2m,is_day" +
-    "&hourly=temperature_2m,weather_code,precipitation_probability,is_day" +
+    "&current=temperature_2m,apparent_temperature,weather_code,precipitation,wind_speed_10m,wind_direction_10m,relative_humidity_2m,is_day" +
+    "&hourly=temperature_2m,weather_code,precipitation,precipitation_probability,is_day" +
     "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
     (METRIC ? "" : "&temperature_unit=fahrenheit&wind_speed_unit=mph") + "&timezone=auto&forecast_days=7&forecast_hours=168";
   var CELL = 84, PAD = 24;
@@ -155,6 +155,16 @@
     if (code <= 67 || (code >= 80 && code <= 82)) return [code >= 80 ? "Showers" : "Rain", "rain"];
     if (code <= 77 || code === 85 || code === 86) return ["Snow", "snow"];
     return ["Thunderstorms", "thunderstorms"];
+  }
+  // the weather code alone can say "cloudy" for an hour that also has rain in it, so an hour that's forecast to get
+  // rain (0.1 mm or more) or has a 60%+ chance of it shows a rain cloud: drizzle when light, rain when heavier
+  function lookWet(code, day, mm, chance) {
+    var L = look(code, day);
+    if (/rain|drizzle|sleet|snow|thunder/.test(L[1])) return L;  // already wet (or white)
+    mm = +mm || 0; chance = +chance || 0;
+    if (mm >= 0.5 || (chance >= 60 && mm >= 0.1)) return ["Rain", "rain"];
+    if (mm >= 0.1 || chance >= 60) return ["Drizzle", "drizzle"];
+    return L;
   }
   function icon(name) { return "https://api.iconify.design/meteocons/" + name + "-fill.svg"; }
   function r(x) { return Math.round(x); }
@@ -182,7 +192,7 @@
   }
   function draw(w, when) {
     w = numbersOnly(w);
-    var c = w.current, d = w.daily, h = w.hourly, L = look(c.weather_code, c.is_day);
+    var c = w.current, d = w.daily, h = w.hourly, L = lookWet(c.weather_code, c.is_day, c.precipitation, 0);  // raining now: rain cloud
     document.getElementById("nowIcon").src = icon(L[1]);
     document.getElementById("nowTemp").innerHTML = r(c.temperature_2m) + "<sup>°" + DEG + "</sup>";
     document.getElementById("nowCond").textContent = L[0];
@@ -202,7 +212,7 @@
       var label = i === 0 ? "Now" : dt.getHours() === 0 ? dt.toLocaleDateString([], { weekday: "short" })
         : dt.toLocaleTimeString([], { hour: "numeric" }).replace(" ", "").toLowerCase();
       track.appendChild(el("div", "h" + (i && dt.getHours() === 0 ? " day" : ""),
-        '<div class="t">' + label + '</div><img alt="" loading="lazy" src="' + icon(look(h.weather_code[i], h.is_day[i])[1]) + '">' +
+        '<div class="t">' + label + '</div><img alt="" loading="lazy" src="' + icon(lookWet(h.weather_code[i], h.is_day[i], (h.precipitation || [])[i], (h.precipitation_probability || [])[i])[1]) + '">' +
         rain(h.precipitation_probability[i])));
     });
 
