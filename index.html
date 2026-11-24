@@ -88,19 +88,52 @@
   .minute { position: absolute; left: 32px; right: 32px; bottom: 16px; height: 3px; border-radius: 2px; background: var(--line); }
   .minute i { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px rgba(242,184,75,.6); transition: width .9s linear; }
 
-  /* media: transport on top, volume below; holding a volume key keeps changing it */
-  .media { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 14px; padding: 22px; }
+  /* now playing: what the PC is playing (cover, title, a progress line) with its keys under it.
+     The cover's colours glow faintly behind the card. Only the keys the playing app supports are shown. */
+  .media { display: grid; grid-template-columns: 156px minmax(0, 1fr); gap: 20px; padding: 22px; }
+  .media .glow { position: absolute; inset: -40px; background: center / cover no-repeat; filter: blur(40px) saturate(1.4); opacity: 0; transition: opacity 1s ease; pointer-events: none; }
+  .media.has-art .glow { opacity: .28; }
+  .art { position: relative; width: 156px; height: 156px; align-self: center; border-radius: 20px; overflow: hidden;
+         background: linear-gradient(160deg, #1a2740, #0f1826); border: 1px solid var(--line); box-shadow: 0 14px 30px -16px #000; }
+  .art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .5s ease; }
+  .media.has-art .art img { opacity: 1; }
+  .art svg { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px; color: var(--dim); }
+  .np { position: relative; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 7px; }
+  .np .from { display: flex; align-items: center; gap: 8px; font-size: 12px; letter-spacing: .18em; text-transform: uppercase; color: var(--dim); height: 16px; }
+  .np .title { font-size: 23px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np .who { font-size: 16px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: -3px; }
+  /* three little level bars that bounce while it plays and rest when paused */
+  .lv { display: flex; align-items: flex-end; gap: 2px; height: 12px; }
+  .lv i { width: 3px; height: 4px; border-radius: 1px; background: var(--accent); }
+  .media.playing .lv i { animation: lv .9s ease-in-out infinite alternate; }
+  .media.playing .lv i:nth-child(2) { animation-duration: .7s; animation-delay: -.3s; }
+  .media.playing .lv i:nth-child(3) { animation-duration: 1.1s; animation-delay: -.6s; }
+  @keyframes lv { from { height: 3px; } to { height: 12px; } }
+  .prog { height: 5px; border-radius: 3px; background: rgba(160,190,230,.12); overflow: hidden; margin-top: 4px; }
+  .prog i { display: block; height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, var(--accent), #ffd98a); transition: width .3s linear; }
+  .times { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; margin-top: -2px; }
+  .media.idle .prog, .media.idle .times { visibility: hidden; }
+  .keys { display: flex; gap: 10px; margin-top: 2px; }
+  .key[hidden] { display: none; }
+  .keys .key { flex: 1; width: auto; }  /* the keys share the row, however many the app allows */
+  .keys .key.main { flex: 1.4; }
+  .key text { font: 650 6.4px Sora, sans-serif; fill: currentColor; stroke: none; text-anchor: middle; }
   .key {
-    border-radius: 18px; border: 1px solid var(--line); cursor: pointer; touch-action: none;
+    width: 62px; height: 50px; border-radius: 15px; border: 1px solid var(--line); cursor: pointer; touch-action: none;
     background: linear-gradient(170deg, #17243a, #101a28); color: var(--text);
     display: flex; align-items: center; justify-content: center;
     transition: transform .12s ease, border-color .2s ease, box-shadow .2s ease;
   }
-  .key svg { width: 54px; height: 54px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  .key svg { width: 28px; height: 28px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
   .key .solid { fill: currentColor; stroke: none; }
-  .key.main { color: var(--accent); border-color: rgba(242,184,75,.35); }
+  .key.main { width: 78px; color: var(--accent); border-color: rgba(242,184,75,.35); }
+  /* the progress line: tap it to jump there (when the app allows it) */
+  .seekable { padding: 9px 0; margin: -9px 0; cursor: pointer; }
+  .media.can-seek .prog { height: 7px; }
+  .key.main .pause { display: none; }
+  .media.playing .key.main .pause { display: block; }
+  .media.playing .key.main .play { display: none; }
   .key:active, .key.hit { transform: scale(.95); border-color: var(--accent); box-shadow: 0 0 24px -8px var(--accent); }
-  .media .vol { color: #c9d4e4; }
 
   /* status badge in the gap between the trays; only shows when there is news */
   .status {
@@ -158,13 +191,23 @@
   <div class="minute"><i id="minute"></i></div>
 </section>
 
-<section class="panel media" aria-label="PC media">
-  <button class="key" data-key="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path class="solid" d="M18 6v12l-9-6z"/><path d="M6 6v12"/></svg></button>
-  <button class="key main" data-key="play" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path class="solid" d="M4 5.5v13l9-6.5z"/><path d="M16 6v12M20 6v12"/></svg></button>
-  <button class="key" data-key="next" aria-label="Next"><svg viewBox="0 0 24 24"><path class="solid" d="M6 6v12l9-6z"/><path d="M18 6v12"/></svg></button>
-  <button class="key vol" data-key="voldown" data-hold aria-label="Volume down"><svg viewBox="0 0 24 24"><path class="solid" d="M3 9.5h4l5-4v13l-5-4H3z"/><path d="M16 12h5"/></svg></button>
-  <button class="key vol" data-key="mute" aria-label="Mute"><svg viewBox="0 0 24 24"><path class="solid" d="M3 9.5h4l5-4v13l-5-4H3z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg></button>
-  <button class="key vol" data-key="volup" data-hold aria-label="Volume up"><svg viewBox="0 0 24 24"><path class="solid" d="M3 9.5h4l5-4v13l-5-4H3z"/><path d="M16 12h5M18.5 9.5v5"/></svg></button>
+<section class="panel media idle" id="media" aria-label="Playing on your PC">
+  <div class="glow" id="glow"></div>
+  <div class="art"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><img id="art" alt=""></div>
+  <div class="np">
+    <div class="from"><span class="lv"><i></i><i></i><i></i></span><span id="npFrom">Your PC</span></div>
+    <div class="title" id="npTitle">Nothing playing</div>
+    <div class="who" id="npWho">Play something on your PC</div>
+    <div class="seekable" id="npSeek"><div class="prog"><i id="npBar"></i></div></div>
+    <div class="times"><span id="npAt">0:00</span><span id="npLeft">0:00</span></div>
+    <div class="keys">
+      <button class="key" id="npPrev" aria-label="Previous track"><svg viewBox="0 0 24 24"><path class="solid" d="M18 6v12l-9-6z"/><path d="M6 6v12"/></svg></button>
+      <button class="key" id="npBack" aria-label="Back 10 seconds"><svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.6-5.7"/><path d="M6.5 2.5v4h4"/><text x="12.6" y="15.4">10</text></svg></button>
+      <button class="key main" data-key="play" aria-label="Play or pause"><svg class="play" viewBox="0 0 24 24"><path class="solid" d="M7 4.5v15l12-7.5z"/></svg><svg class="pause" viewBox="0 0 24 24"><path class="solid" d="M6 4.5h4v15H6zM14 4.5h4v15h-4z"/></svg></button>
+      <button class="key" id="npFwd" aria-label="Forward 10 seconds"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.6-5.7"/><path d="M17.5 2.5v4h-4"/><text x="11.4" y="15.4">10</text></svg></button>
+      <button class="key" id="npNext" aria-label="Next track"><svg viewBox="0 0 24 24"><path class="solid" d="M6 6v12l9-6z"/><path d="M18 6v12"/></svg></button>
+    </div>
+  </div>
 </section>
 
 <div class="status" id="status" role="status"></div>
@@ -224,7 +267,7 @@
 
   // media keys: each tap presses that key on the PC (Windows sends it to YouTube, Spotify, etc.);
   // holding a volume key repeats it (each press is about 2% on Windows)
-  Array.prototype.forEach.call(document.querySelectorAll(".key"), function (b) {
+  Array.prototype.forEach.call(document.querySelectorAll(".key[data-key]"), function (b) {
     var path = "/key/" + b.dataset.key, rep, wait;
     function press() { pc(path).catch(release); }
     function release() { clearTimeout(wait); clearInterval(rep); b.classList.remove("hit"); }
@@ -234,6 +277,86 @@
     });
     ["pointerup", "pointerleave", "pointercancel"].forEach(function (ev) { b.addEventListener(ev, release); });
   });
+
+  // now playing: asks the PC helper every second what Windows says is playing, and moves the line between asks
+  var NP = null, npAt = 0, npArt = -1, mediaEl = document.getElementById("media");
+  function mmss(s) { s = Math.max(0, Math.floor(s)); var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return (h ? h + ":" + ("0" + m).slice(-2) : m) + ":" + ("0" + s % 60).slice(-2); }
+  function appName(id) {  // Windows gives an app id like "Brave.ABC123" or "Spotify.exe"
+    var known = { spotify: "Spotify", chrome: "Chrome", brave: "Brave", msedge: "Edge", firefox: "Firefox", zunemusic: "Media Player", vlc: "VLC", opera: "Opera", applemusic: "Apple Music", discord: "Discord" };
+    var low = (id || "").toLowerCase();
+    for (var k in known) if (low.indexOf(k) >= 0) return known[k];
+    return (id || "Your PC").split(/[.!_]/)[0];
+  }
+  function drawNow() {
+    var n = NP, on = n && n.title;
+    mediaEl.classList.toggle("idle", !on);
+    mediaEl.classList.toggle("playing", !!(on && n.playing));
+    document.getElementById("npTitle").textContent = on ? n.title : "Nothing playing";
+    document.getElementById("npWho").textContent = on ? (n.artist || n.album || " ") : "Play something on your PC";
+    document.getElementById("npFrom").textContent = on ? appName(n.app) + (n.playing ? "" : " · paused") : "Your PC";
+    if (on && n.length > 0) {
+      var at = Math.min(n.length, n.position + (n.playing ? (Date.now() - npAt) / 1000 : 0));
+      document.getElementById("npBar").style.width = (at / n.length * 100) + "%";
+      document.getElementById("npAt").textContent = mmss(at);
+      document.getElementById("npLeft").textContent = "-" + mmss(n.length - at);
+    } else if (on) {  // live streams and some apps don't say how long
+      document.getElementById("npBar").style.width = "0";
+      document.getElementById("npAt").textContent = n.playing ? "Live" : "";
+      document.getElementById("npLeft").textContent = "";
+    }
+    // only the keys the app supports: YouTube has no next/previous outside a playlist, but lets you jump around
+    document.getElementById("npPrev").hidden = !(on && n.prev);
+    document.getElementById("npNext").hidden = !(on && n.next);
+    var seek = !!(on && n.seek && n.length > 0);
+    document.getElementById("npBack").hidden = document.getElementById("npFwd").hidden = !seek;
+    mediaEl.classList.toggle("can-seek", seek);
+    var art = on ? n.art : 0;
+    if (art !== npArt) {
+      npArt = art;
+      var src = art ? DECK.pc + "/art?k=" + encodeURIComponent(DECK.key) + "&v=" + art : "";
+      mediaEl.classList.remove("has-art");
+      var img = document.getElementById("art");
+      if (src) { img.onload = function () { mediaEl.classList.add("has-art"); }; img.src = src; document.getElementById("glow").style.backgroundImage = "url('" + src + "')"; }
+      else img.removeAttribute("src");
+    }
+  }
+  function loadNow() {
+    if (document.hidden) return;
+    var stop = new AbortController(); setTimeout(function () { stop.abort(); }, 2500);
+    fetch(DECK.pc + "/nowplaying?k=" + encodeURIComponent(DECK.key), { signal: stop.signal })
+      .then(function (r) { if (!r.ok) throw r; return r.json(); })
+      .then(function (n) { NP = n; npAt = Date.now(); drawNow(); })
+      .catch(function () { NP = null; drawNow(); });  // PC off or asleep: show "Nothing playing"
+  }
+  loadNow(); setInterval(loadNow, 1000); setInterval(drawNow, 250);
+  // skip and jump: sent to the PC helper, which passes them to Windows' media controls
+  function npSend(path) {
+    var stop = new AbortController(); setTimeout(function () { stop.abort(); }, 4000);
+    fetch(DECK.pc + path + (path.indexOf("?") < 0 ? "?" : "&") + "k=" + encodeURIComponent(DECK.key), { method: "POST", signal: stop.signal }).catch(function () {});
+  }
+  function npNow() { return NP.position + (NP.playing ? (Date.now() - npAt) / 1000 : 0); }
+  function jumpTo(t) {  // moves the line straight away; the next ask confirms it
+    if (!NP || !NP.seek) return;
+    t = Math.max(0, Math.min(NP.length - 1, t));
+    NP.position = t; npAt = Date.now(); drawNow();
+    npSend("/np/seek?to=" + t.toFixed(1));
+  }
+  document.getElementById("npBack").onclick = function () { jumpTo(npNow() - 10); };
+  document.getElementById("npFwd").onclick = function () { jumpTo(npNow() + 10); };
+  document.getElementById("npPrev").onclick = function () { npSend("/np/prev"); };
+  document.getElementById("npNext").onclick = function () { npSend("/np/next"); };
+  document.getElementById("npSeek").onclick = function (e) {
+    var bar = this.querySelector(".prog"), r = bar.getBoundingClientRect();
+    if (NP && NP.length > 0) jumpTo((e.clientX - r.left) / r.width * NP.length);
+  };
+  ["npBack", "npFwd", "npPrev", "npNext"].forEach(function (id) {
+    var b = document.getElementById(id);
+    b.addEventListener("pointerdown", function () { b.classList.add("hit"); });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(function (ev) { b.addEventListener(ev, function () { b.classList.remove("hit"); }); });
+  });
+
+  // tapping play/pause flips the button straight away; the next ask confirms it
+  document.querySelector(".key.main").addEventListener("click", function () { if (NP && NP.title) { NP.position += NP.playing ? (Date.now() - npAt) / 1000 : 0; npAt = Date.now(); NP.playing = !NP.playing; drawNow(); } });
 
   // The deck is designed at 1280x800; shrink it to fit screens that report fewer CSS pixels (the Echo reports ~853x533).
   function fit() {

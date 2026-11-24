@@ -7,7 +7,7 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
 - **Top left: apps on the screen itself.** Weather, a timer and alarm (flick-to-pick time wheels), a calendar where you can add events with reminders, and Google. These work even when your PC is off.
 - **Top right: apps on your PC.** One tap opens Claude, ChatGPT, Terminal, Obsidian, or anything else you list.
 - **Middle: Claude usage.** Your 5-hour and weekly Claude plan usage, and when each one resets. This is optional.
-- **Bottom: a clock and PC media keys.** Play/pause, next and previous, and volume.
+- **Bottom: a clock, and what your PC is playing.** The cover picture, title and a progress line, with play/pause and 10-second skips. Tap the line to jump.
 - **"Alexa, open sesame"** brings the deck back from the Alexa screen (Echo only, optional).
 
 | Weather | Calendar | Timer & alarm |
@@ -35,6 +35,7 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
    - `weather`: your town's name, a short label (like a ZIP code), its latitude and longitude, and `"us"` (°F, mph) or `"metric"` (°C, km/h). You can find the coordinates on Google Maps: right-click a spot to copy them.
    - `calendars`: Google Calendar *secret iCal addresses*, if you want them (see below). Up to 4 get their own colour.
    - `claude_usage`: `false` hides the Claude usage panel.
+   - `now_playing`: `false` stops the PC helper reading what's playing.
    - `adb`: the full path to `adb.exe`, if it isn't on your PATH.
 3. **Choose your PC apps** in `pads.json`.
    - Each PC pad has an `id`, a logo (`icon`, from [Iconify](https://icon-sets.iconify.design/)), and `pc`: what to open.
@@ -81,6 +82,14 @@ The helper reads the Claude sign-in that Claude Code saves on your PC (`~/.claud
 - You need [Claude Code](https://claude.com/claude-code) installed and signed in on the PC.
 - To turn it off, set `"claude_usage": false`.
 
+### Now playing
+
+The card at the bottom right shows what your PC is playing: anything that appears in the Windows volume pop-up, like YouTube in a browser, Spotify or Media Player.
+
+- **The keys:** play/pause, and back or forward 10 seconds. You can also tap anywhere on the progress line to jump there.
+- **Next and previous track** appear only when the app supports them. YouTube in a browser doesn't, unless you're playing a playlist. Spotify does.
+- **How it works:** `nowplaying.ps1` reads Windows' media controls about once a second. The PC helper starts it, and it needs nothing installed.
+
 ### "Alexa, open sesame" (Echo only, optional)
 
 On a rooted Echo Show, Alexa won't open apps. `echo-app/` is a tiny Android accessibility service that watches only Alexa's own screen. When your newest request reads "open sesame", it closes Alexa and brings Fully back to the front.
@@ -102,14 +111,14 @@ To turn it off, run `adb uninstall com.homedeck.opensesame`.
   - `sync_echo.py` writes `config.js` (your PC's address, the helper key, and your settings) and `pads.js` next to them.
   - Weather comes from [Open-Meteo](https://open-meteo.com/) (free, no key). The calendar reads iCal feeds directly, with its own repeat-event support.
 - **`deck_server.py` is the PC helper.** It's plain Python with no installs, and listens on port 8765.
-  - It only opens apps listed in `pads.json` and only presses media keys.
+  - It only opens apps listed in `pads.json`, presses media keys, and reads and moves what's playing through Windows' media controls.
   - Every request has to carry a random key that it creates in `.deck-key` on first run, and it hides that key in its log.
 - **Built for a 1280×800 screen.** Pages shrink themselves to fit smaller screens.
 
 ## Safety notes
 
 - Never upload or share `settings.json`, `.deck-key` or `deck.log`. They're already in `.gitignore`.
-- Anyone on your Wi-Fi who learns the key could open the listed apps or press the media keys, but nothing else.
+- Anyone on your Wi-Fi who learns the key could open the listed apps, see what's playing and control it, but nothing else.
 - The screen talks to the PC over plain HTTP on your home network, so only use it on a Wi-Fi you trust, and allow the helper on **private** networks only.
 - The key is also saved on the screen (in `config.js`, in Fully's folder).
 - The pages load fonts from Google Fonts and logos from Iconify, so those services see your IP address when a page opens.

@@ -9,5 +9,6 @@
   },
   "calendars": [],
   "claude_usage": true,
+  "now_playing": true,
   "adb": ""
 }

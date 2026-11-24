@@ -95,6 +95,31 @@ def usage_loop():
         time.sleep(300)
 
 
+# What the PC is playing, for the deck's now-playing card: nowplaying.ps1 reads Windows' media controls
+# (the same info as the volume pop-up) and prints a line about every second. Its cover picture goes to ART.
+NOW = {"playing": False}
+NP_PROC = None  # the running nowplaying.ps1; the deck's skip keys and progress line send it commands
+ART = HERE / "nowplaying-art.bin"
+
+
+def now_playing_loop():
+    global NOW, NP_PROC
+    while True:
+        try:
+            NP_PROC = p = subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(HERE / "nowplaying.ps1"), "-ArtFile", str(ART)],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW)
+            for line in p.stdout:
+                try:
+                    NOW = json.loads(line)  # swapped whole, so a request never sees half of it
+                except ValueError:
+                    pass
+            print("Now playing reader stopped; restarting it")
+        except Exception as e:
+            print(f"Now playing not available: {type(e).__name__}")
+        NOW = {"playing": False}
+        time.sleep(10)
+
+
 class Deck(BaseHTTPRequestHandler):
     def _authorized(self, query):
         given = query.get("k", [""])[0]
@@ -102,6 +127,8 @@ class Deck(BaseHTTPRequestHandler):
 
     # keep the key out of deck.log
     def log_request(self, code="-", size="-"):
+        if code == 200 and self.path.startswith(("/nowplaying", "/art")):
+            return  # asked every second; logging them would fill deck.log
         self.log_message('"%s" %s %s', self.requestline, code, size)
 
     def log_message(self, fmt, *args):
@@ -122,6 +149,14 @@ class Deck(BaseHTTPRequestHandler):
         if url.path == "/usage":  # Claude usage for the deck's middle panel
             f = HERE / "usage.json"
             return self._send(200, f.read_bytes() if f.exists() else b"{}", "application/json")
+        if url.path == "/nowplaying":
+            return self._send(200, json.dumps(NOW).encode(), "application/json")
+        if url.path == "/art":
+            try:
+                img = ART.read_bytes()
+            except OSError:
+                return self._send(404, b"No picture")
+            return self._send(200, img, "image/png" if img[:4] == b"\x89PNG" else "image/jpeg")
         self._send(404, b"Not found")
 
     def do_POST(self):
@@ -133,6 +168,18 @@ class Deck(BaseHTTPRequestHandler):
             if vk is None:
                 return self._send(404, b"Unknown key")
             press(vk)
+            return self._send(204)
+        if url.path in ("/np/next", "/np/prev", "/np/seek"):  # skip or jump in what's playing
+            cmd = url.path.removeprefix("/np/")
+            if cmd == "seek":
+                try:
+                    cmd = f"seek {max(0.0, float(parse_qs(url.query).get('to', [''])[0])):.1f}"
+                except ValueError:
+                    return self._send(400, b"Bad time")
+            try:
+                NP_PROC.stdin.write(cmd + "\n"); NP_PROC.stdin.flush()
+            except (AttributeError, OSError):
+                return self._send(503, b"Now playing isn't running")
             return self._send(204)
         target = ACTIONS.get(url.path.removeprefix("/run/"))
         if target is None:
@@ -155,4 +202,6 @@ if __name__ == "__main__":
     print("Keep this window open. Press Ctrl+C to stop.")
     if SETTINGS.get("claude_usage", True):
         threading.Thread(target=usage_loop, daemon=True).start()
+    if SETTINGS.get("now_playing", True):
+        threading.Thread(target=now_playing_loop, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Deck).serve_forever()

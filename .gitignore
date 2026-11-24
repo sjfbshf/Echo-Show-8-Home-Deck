@@ -15,3 +15,6 @@ echo-app/out/
 deck-screenshot.png
 index-classic.html
 index-night-console.html
+
+# what the PC is playing (cover picture)
+nowplaying-art.bin
