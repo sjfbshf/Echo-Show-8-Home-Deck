@@ -7,16 +7,16 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
 - **Top left: apps on the screen itself.** Weather, a timer and alarm (flick-to-pick time wheels), a calendar where you can add events with reminders, and Google. These work even when your PC is off.
 - **Top right: apps on your PC.** One tap opens Claude, ChatGPT, Terminal, Obsidian, or anything else you list.
 - **Middle: Claude usage.** Your 5-hour and weekly Claude plan usage, and when each one resets. This is optional.
-- **Bottom: a clock, and what your PC is playing.** The cover picture, title and a progress line, with play/pause and 10-second skips. Tap the line to jump.
+- **Bottom: a clock, and what your PC is playing.** Tap the clock for **Hearth**, a cozy full-screen clock: light that follows the day, drifting embers, an analog clock, and the sun's (or moon's) path across today's sky. The cover picture, title and a progress line, with play/pause and 10-second skips. Tap the line to jump.
 - **"Alexa, open sesame"** brings the deck back from the Alexa screen (Echo only, optional).
 
 | Weather | Calendar | Timer & alarm |
 |---|---|---|
 | ![Weather](docs/weather.png) | ![Calendar](docs/calendar.png) | ![Timer](docs/timer.png) |
 
-| Adding an event with a reminder | Google |
-|---|---|
-| ![Adding an event](docs/calendar-event.png) | ![Google](docs/google.png) |
+| Adding an event with a reminder | Google | The Hearth clock |
+|---|---|---|
+| ![Adding an event](docs/calendar-event.png) | ![Google](docs/google.png) | ![Hearth clock](docs/clock.png) |
 
 ## What you need
 

@@ -23,7 +23,7 @@ if not ADB:
 ECHO_DIR = "/sdcard/Android/data/de.ozerov.fully/files/home-deck"  # Fully's own folder: readable without extra permissions
 START_URL = f"file://{ECHO_DIR}/index.html"
 PREFS = "/data/data/de.ozerov.fully/shared_prefs/de.ozerov.fully_preferences.xml"
-PAGES = ["index.html", "timer.html", "weather.html", "calendar.html", "google.html", "alarm.js", "wheel.js"]
+PAGES = ["index.html", "timer.html", "weather.html", "calendar.html", "google.html", "alarm.js", "wheel.js", "clock.html"]
 if SETTINGS_FILE.name != "settings.json":
     print("No settings.json yet, so using settings.example.json. Copy it to settings.json and fill in your own place.")
 

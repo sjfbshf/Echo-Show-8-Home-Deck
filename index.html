@@ -81,7 +81,8 @@
   }
 
   /* clock: time, date, and a thin amber line that fills over each minute */
-  .clock { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+  .clock { display: flex; align-items: center; justify-content: space-between; gap: 20px; cursor: pointer; transition: transform .15s ease, border-color .2s ease; }
+  .clock:active { transform: scale(.985); border-color: rgba(242,184,75,.4); }  /* tap the time: the Hearth clock screen */
   .time { font-size: 112px; font-weight: 300; letter-spacing: -.04em; line-height: 1; white-space: nowrap; }
   .time small { font-size: 30px; letter-spacing: .04em; color: var(--dim); margin-left: 10px; }
   .date { font-size: 20px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin-top: 10px; }
@@ -505,6 +506,9 @@
   document.getElementById("hudBack").onclick = closeHud;
   hud.addEventListener("click", function (e) { if (e.target === hud || e.target === document.getElementById("hudBg")) closeHud(); });
   loadNow(); setInterval(loadNow, 1000); setInterval(drawNow, 250);
+
+  // tapping the time opens the cozy full-screen clock
+  document.querySelector(".panel.clock").addEventListener("click", function () { location.href = "clock.html"; });
 
   // The deck is designed at 1280x800; shrink it to fit screens that report fewer CSS pixels (the Echo reports ~853x533).
   function fit() {

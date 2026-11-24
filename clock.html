@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- fixed scale: this page places things at set spots, and Android would otherwise widen and zoom the page to fit them -->
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no">
+<title>Hearth</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@200;300;500&display=swap" rel="stylesheet">
+<script src="config.js"></script>
+<script src="alarm.js"></script>
+<style>
+  /* "Hearth": a quiet clock to leave on. Opened by tapping the time on the deck; tap anywhere to go back.
+     The light follows the day (cool dawn, warm afternoon, ember dusk, plum night), embers drift up, the hands
+     sweep, and a small diagram shows the sun's (or moon's) way across today's sky.
+     Everything that moves uses transform/opacity only, so the Echo's graphics chip does the work. */
+  :root { --text: #f6ecdf; --dim: rgba(246,236,223,.55); --glow: 242,170,90; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    position: relative; overflow: hidden; color: var(--text); cursor: pointer;
+    font-family: "Sora", "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none;
+    background: #0d0a12;
+  }
+  /* the sky: two layers, so a new time of day can fade in over the old one */
+  .sky { position: absolute; inset: 0; opacity: 0; transition: opacity 6s ease; }
+  .sky.on { opacity: 1; }
+  .vignette { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 45%, transparent 35%, rgba(0,0,0,.55) 100%); pointer-events: none; }
+
+  /* embers drifting up */
+  .embers { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  .embers i { position: absolute; bottom: -20px; width: var(--s); height: var(--s); border-radius: 50%;
+              background: radial-gradient(circle, rgba(255,214,150,.95), rgba(var(--glow),.0) 70%);
+              opacity: 0; animation: rise var(--d) linear infinite; animation-delay: var(--w); will-change: transform, opacity; }
+  @keyframes rise {
+    0% { transform: translate(0, 0); opacity: 0; }
+    12% { opacity: var(--o); }
+    50% { transform: translate(var(--x), -420px); }
+    85% { opacity: var(--o); }
+    100% { transform: translate(calc(var(--x) * -0.6), -860px); opacity: 0; }
+  }
+
+  /* the analog clock, lit like a lamp from behind */
+  .clock { position: absolute; left: 150px; top: 130px; width: 440px; height: 440px; }
+  .lamp { position: absolute; inset: -150px; border-radius: 50%;
+          background: radial-gradient(circle, rgba(var(--glow),.30), rgba(var(--glow),.10) 38%, transparent 62%); }
+  .face { position: absolute; inset: 0; border-radius: 50%;
+          background: radial-gradient(circle at 50% 38%, rgba(255,240,220,.10), rgba(20,12,18,.55) 70%);
+          box-shadow: inset 0 0 0 1px rgba(255,230,200,.16), 0 30px 60px -30px #000; }
+  .face svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .hand { position: absolute; left: 50%; bottom: 50%; transform-origin: 50% 100%; border-radius: 6px; will-change: transform; }
+  .hand.h { width: 12px; height: 118px; margin-left: -6px; background: var(--text); animation: turn 43200s linear infinite; }
+  .hand.m { width: 8px; height: 172px; margin-left: -4px; background: var(--text); animation: turn 3600s linear infinite; }
+  .hand.s { width: 3px; height: 196px; margin-left: -1.5px; background: rgb(var(--glow)); animation: turn 60s linear infinite;
+            box-shadow: 0 0 10px rgba(var(--glow),.6); }
+  .hand.s::after { content: ""; position: absolute; left: 50%; bottom: -34px; width: 3px; height: 34px; margin-left: -1.5px; background: inherit; border-radius: 2px; }
+  .pin { position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px; border-radius: 50%; background: rgb(var(--glow)); box-shadow: 0 0 0 5px #1a1016; }
+  @keyframes turn { to { transform: rotate(360deg); } }
+
+  /* the right side: time, a sentence about now, and the sun's path */
+  .right { position: absolute; left: 700px; right: 70px; top: 150px; }
+  .time { font-size: 150px; font-weight: 200; letter-spacing: -.04em; line-height: .95; white-space: nowrap; }
+  .time small { font-size: 40px; font-weight: 300; letter-spacing: .04em; color: var(--dim); margin-left: 12px; }
+  .time .colon { display: inline-block; animation: breathe 2s ease-in-out infinite; }
+  @keyframes breathe { 50% { opacity: .35; } }
+  .now { margin-top: 18px; font-size: 30px; font-weight: 300; }
+  .now b { font-weight: 500; color: rgb(var(--glow)); }
+  .date { margin-top: 8px; font-size: 17px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+  .sun { margin-top: 48px; width: 100%; height: 150px; overflow: visible; }
+  .sun .path { fill: none; stroke: rgba(255,230,200,.22); stroke-width: 2; stroke-dasharray: 2 7; stroke-linecap: round; }
+  .sun .done { fill: none; stroke: rgba(var(--glow),.75); stroke-width: 3; stroke-linecap: round; }
+  .sun .ground { stroke: rgba(255,230,200,.18); stroke-width: 1; }
+  .sun text { font: 300 15px Sora, sans-serif; fill: var(--dim); }
+  .sun .orb { transition: transform 1s ease; }
+  .hint { position: absolute; left: 0; right: 0; bottom: 34px; text-align: center; font-size: 15px; letter-spacing: .16em;
+          text-transform: uppercase; color: var(--dim); transition: opacity 1.2s ease; }
+  .hint.gone { opacity: 0; }
+
+  /* everything rises in once when the screen opens */
+  .in { opacity: 0; transform: translateY(16px); animation: arrive 1s cubic-bezier(.2,.8,.2,1) forwards; }
+  @keyframes arrive { to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .embers, .time .colon { animation: none; } .in { animation-duration: .01s; } }
+</style>
+</head>
+<body>
+  <div class="sky" id="skyA"></div><div class="sky" id="skyB"></div>
+  <div class="embers" id="embers"></div>
+  <div class="vignette"></div>
+
+  <div class="clock in" style="animation-delay:.05s">
+    <div class="lamp"></div>
+    <div class="face"><svg viewBox="0 0 440 440" id="ticks"></svg></div>
+    <div class="hand h" id="hH"></div>
+    <div class="hand m" id="hM"></div>
+    <div class="hand s" id="hS"></div>
+    <div class="pin"></div>
+  </div>
+
+  <div class="right">
+    <div class="time in" id="time" style="animation-delay:.15s"></div>
+    <div class="now in" id="now" style="animation-delay:.25s"></div>
+    <div class="date in" id="date" style="animation-delay:.32s"></div>
+    <svg class="sun in" id="sun" viewBox="0 0 510 150" style="animation-delay:.45s"></svg>
+  </div>
+  <div class="hint" id="hint">Tap anywhere to go back</div>
+
+<script>
+  var DECK = window.DECK || {}, W = DECK.weather || {};
+  function $(id) { return document.getElementById(id); }
+  document.addEventListener("click", function () { location.href = "index.html"; });
+  setTimeout(function () { $("hint").classList.add("gone"); }, 3500);
+
+  // ---- the clock face: 60 marks, longer at the hours ----
+  (function () {
+    var s = "";
+    for (var i = 0; i < 60; i++) {
+      var a = i * 6 * Math.PI / 180, big = i % 5 === 0, r1 = big ? 188 : 196, r2 = 206;
+      s += '<line x1="' + (220 + r1 * Math.sin(a)).toFixed(1) + '" y1="' + (220 - r1 * Math.cos(a)).toFixed(1) +
+           '" x2="' + (220 + r2 * Math.sin(a)).toFixed(1) + '" y2="' + (220 - r2 * Math.cos(a)).toFixed(1) +
+           '" stroke="rgba(255,236,214,' + (big ? .7 : .22) + ')" stroke-width="' + (big ? 4 : 2) + '" stroke-linecap="round"/>';
+    }
+    $("ticks").innerHTML = s;
+  })();
+
+  // ---- the hands: each is one endless CSS rotation, started at the right spot, so they sweep with no script per frame ----
+  function setHands() {
+    var d = new Date(), sec = d.getSeconds() + d.getMilliseconds() / 1000, min = d.getMinutes() + sec / 60, hr = d.getHours() % 12 + min / 60;
+    $("hS").style.animationDelay = -sec + "s";
+    $("hM").style.animationDelay = -(min * 60) + "s";
+    $("hH").style.animationDelay = -(hr * 3600) + "s";
+  }
+  setHands();
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) setHands(); });  // back in step after sleep
+  setInterval(setHands, 600000);
+
+  // ---- embers: a few warm motes, each with its own size, speed, drift and start ----
+  (function () {
+    var box = $("embers"), html = "";
+    for (var i = 0; i < 16; i++) {
+      var size = 3 + Math.random() * 7;
+      html += '<i style="left:' + (Math.random() * 100).toFixed(1) + '%;--s:' + size.toFixed(1) + 'px;--d:' + (14 + Math.random() * 16).toFixed(1) +
+              's;--w:-' + (Math.random() * 30).toFixed(1) + 's;--x:' + (Math.random() * 80 - 40).toFixed(0) + 'px;--o:' + (0.25 + Math.random() * 0.5).toFixed(2) + '"></i>';
+    }
+    box.innerHTML = html;
+  })();
+
+  // ---- sunrise and sunset for the deck's place (the standard solar-position sums; no internet needed) ----
+  function sunTimes(day, lat, lon) {
+    var rad = Math.PI / 180, dayMs = 86400000, J1970 = 2440588, J2000 = 2451545, e = rad * 23.4397;
+    var noonLocal = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 12);
+    var lw = -lon * rad, phi = lat * rad;
+    var n = Math.round(noonLocal / dayMs - 0.5 + J1970 - J2000 - 0.0009 - lw / (2 * Math.PI));
+    var ds = 0.0009 + lw / (2 * Math.PI) + n, M = rad * (357.5291 + 0.98560028 * ds);
+    var C = rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+    var L = M + C + rad * 102.9372 + Math.PI, dec = Math.asin(Math.sin(e) * Math.sin(L));
+    var transit = J2000 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+    var cosW = (Math.sin(-0.833 * rad) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+    if (cosW < -1 || cosW > 1) return null;  // midnight sun or polar night
+    var w = Math.acos(cosW), set = J2000 + 0.0009 + (w + lw) / (2 * Math.PI) + n + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+    var rise = transit - (set - transit), toDate = function (j) { return new Date((j + 0.5 - J1970) * dayMs); };
+    return { rise: toDate(rise), set: toDate(set) };
+  }
+
+  // ---- the light of the day ----
+  var SKIES = {
+    night:     "radial-gradient(ellipse at 30% 110%, #2a1534 0%, transparent 55%), linear-gradient(170deg, #0b0a16, #160f22 60%, #0d0a12)",
+    dawn:      "radial-gradient(ellipse at 25% 105%, #6a3b4a 0%, transparent 55%), linear-gradient(170deg, #121a2e, #2a2540 55%, #1a1220)",
+    morning:   "radial-gradient(ellipse at 30% 100%, #4a3a2c 0%, transparent 55%), linear-gradient(170deg, #14202e, #243040 55%, #17141c)",
+    afternoon: "radial-gradient(ellipse at 30% 105%, #5a3a1e 0%, transparent 55%), linear-gradient(170deg, #1a1a24, #2c2420 55%, #161014)",
+    dusk:      "radial-gradient(ellipse at 25% 105%, #7a3318 0%, transparent 55%), linear-gradient(170deg, #1a1222, #3a1d22 55%, #140c12)"
+  };
+  var GLOW = { night: "196,140,255", dawn: "255,170,150", morning: "255,200,140", afternoon: "242,170,90", dusk: "255,140,80" };
+  var phase = null, front = "skyA";
+  function setPhase(p) {
+    if (p === phase) return;
+    phase = p;
+    var next = front === "skyA" ? "skyB" : "skyA";
+    $(next).style.background = SKIES[p];
+    $(next).classList.add("on"); $(front).classList.remove("on");  // the new light fades in over the old
+    front = next;
+    document.documentElement.style.setProperty("--glow", GLOW[p]);
+  }
+
+  function clock12(d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+  var lastMinute = -1;
+  function tick() {
+    var d = new Date();
+    if (d.getMinutes() === lastMinute) return;
+    lastMinute = d.getMinutes();
+    var t = clock12(d), ampm = (/\s?([AP]M)$/i.exec(t) || [])[1];
+    $("time").innerHTML = t.replace(/\s?[AP]M$/i, "").replace(":", '<span class="colon">:</span>') + (ampm ? "<small>" + ampm + "</small>" : "");
+    $("date").textContent = d.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
+
+    var h = d.getHours() + d.getMinutes() / 60, part = h < 5 ? "night" : h < 12 ? "morning" : h < 17 ? "afternoon" : h < 21 ? "evening" : "night";
+    var sentence = d.toLocaleDateString([], { weekday: "long" }) + " <b>" + part + "</b>";
+    try {  // the outside temperature, from the weather page's last forecast (kept on the Echo)
+      var wx = JSON.parse(localStorage.getItem("deckWeather") || "null");
+      if (wx && Date.now() - wx.at < 3 * 3600000) sentence += " · " + Math.round(wx.w.current.temperature_2m) + "° outside";
+    } catch (e) {}
+    $("now").innerHTML = sentence;
+
+    var sun = W.latitude != null ? sunTimes(d, +W.latitude, +W.longitude) : null;
+    drawSun(d, sun);
+    // the sky follows the real sun when the place is known, otherwise the clock
+    var p;
+    if (sun) {
+      var hr = 3600000;
+      p = d < sun.rise - hr ? "night" : d < +sun.rise + hr ? "dawn" : d < (+sun.rise + +sun.set) / 2 + hr ? "morning" : d < sun.set - hr ? "afternoon" : d < +sun.set + hr ? "dusk" : "night";
+    } else p = h < 5 || h >= 21 ? "night" : h < 8 ? "dawn" : h < 13 ? "morning" : h < 18 ? "afternoon" : "dusk";
+    setPhase(p);
+  }
+
+  // ---- the sun's path: a dotted arch from sunrise to sunset, the part already travelled lit, and the sun on it.
+  //      At night the moon walks a lower arch from sunset to sunrise. ----
+  function drawSun(now, sun) {
+    var svg = $("sun");
+    if (!sun) { svg.innerHTML = ""; return; }
+    var x0 = 30, x1 = 480, base = 118, top = 18, day = now >= sun.rise && now <= sun.set;
+    var start, end;
+    if (day) { start = sun.rise; end = sun.set; }
+    else if (now > sun.set) { start = sun.set; end = sunTimes(new Date(+now + 86400000), +W.latitude, +W.longitude).rise; }
+    else { start = sunTimes(new Date(+now - 86400000), +W.latitude, +W.longitude).set; end = sun.rise; }
+    var f = Math.max(0, Math.min(1, (now - start) / (end - start)));
+    var peak = day ? top : 62;  // the moon's arch is lower
+    // a quadratic curve through (x0,base) - (mid, peak) - (x1,base): the point at f is easy to work out
+    var cx = (x0 + x1) / 2, cy = 2 * peak - base;
+    function at(t) { var u = 1 - t; return [u * u * x0 + 2 * u * t * cx + t * t * x1, u * u * base + 2 * u * t * cy + t * t * base]; }
+    var pts = [], i; for (i = 0; i <= 40; i++) pts.push(at(i / 40 * f).map(function (v) { return v.toFixed(1); }).join(","));
+    var p = at(f), orb = day
+      ? '<circle r="13" fill="rgb(255,206,120)"/><circle r="22" fill="rgba(255,190,90,.22)"/>'
+      : '<circle r="11" fill="#efe6ff"/><circle r="11" cx="5" cy="-3" fill="#160f22"/><circle r="20" fill="rgba(210,190,255,.12)"/>';
+    svg.innerHTML =
+      '<line class="ground" x1="0" y1="' + base + '" x2="510" y2="' + base + '"/>' +
+      '<path class="path" d="M' + x0 + "," + base + " Q" + cx + "," + cy + " " + x1 + "," + base + '"/>' +
+      '<polyline class="done" points="' + pts.join(" ") + '"/>' +
+      '<g class="orb" transform="translate(' + p[0].toFixed(1) + "," + p[1].toFixed(1) + ')">' + orb + "</g>" +
+      '<text x="' + x0 + '" y="' + (base + 26) + '" text-anchor="middle">' + (day ? "↑ " : "↓ ") + clock12(start) + "</text>" +
+      '<text x="' + x1 + '" y="' + (base + 26) + '" text-anchor="middle">' + (day ? "↓ " : "↑ ") + clock12(end) + "</text>";
+  }
+
+  tick(); setInterval(tick, 1000);
+
+  // same fit as the deck: designed at 1280x800, shrunk to the Echo's ~853x533
+  function fit() {
+    var s = document.body.style, z = Math.min(innerWidth / 1280, innerHeight / 800);
+    s.zoom = z < 1 ? z : ""; s.width = z < 1 ? "1280px" : ""; s.height = z < 1 ? "800px" : "";
+  }
+  fit(); addEventListener("resize", fit);
+</script>
+</body>
+</html>
