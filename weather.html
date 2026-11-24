@@ -166,7 +166,22 @@
 
   var dayStart = {};  // "2026-11-24" -> index of that day's first hour in the strip
 
+  // every forecast value is forced to be a plain number before it reaches the page (a few are written as HTML,
+  // and this page can read the deck key), so a broken or tampered answer can only ever show as 0
+  function numbersOnly(w) {
+    ["current", "hourly", "daily"].forEach(function (part) {
+      var o = w[part] || {};
+      Object.keys(o).forEach(function (k) {
+        if (k === "time" || /sun/.test(k)) { o[k] = Array.isArray(o[k]) ? o[k].map(String) : String(o[k]); return; }
+        var fix = function (v) { v = +v; return isFinite(v) ? v : 0; };
+        o[k] = Array.isArray(o[k]) ? o[k].map(fix) : fix(o[k]);
+      });
+      w[part] = o;
+    });
+    return w;
+  }
   function draw(w, when) {
+    w = numbersOnly(w);
     var c = w.current, d = w.daily, h = w.hourly, L = look(c.weather_code, c.is_day);
     document.getElementById("nowIcon").src = icon(L[1]);
     document.getElementById("nowTemp").innerHTML = r(c.temperature_2m) + "<sup>°" + DEG + "</sup>";

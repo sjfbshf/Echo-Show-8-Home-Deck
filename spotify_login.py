@@ -6,10 +6,11 @@ before this one: make a free app on developer.spotify.com and put its Client ID 
 
 Run:  python spotify_login.py
 Your browser opens Spotify's own sign-in page. After you agree, the helper keeps a renewal token in
-.spotify-token (never uploaded). To disconnect, delete that file, or remove the app at
-https://www.spotify.com/account/apps/.
+%USERPROFILE%\\.homedeck\\.spotify-token (on this PC only, never uploaded). To disconnect, delete that file,
+or remove the app at https://www.spotify.com/account/apps/.
 """
 import base64
+import os
 import hashlib
 import json
 import secrets
@@ -21,12 +22,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
-HERE = Path(__file__).parent
-SETTINGS = json.loads(((HERE / "settings.json") if (HERE / "settings.json").exists() else (HERE / "settings.example.json")).read_text(encoding="utf-8"))
+from deck_server import DATA, SETTINGS  # the same settings and private folder the helper uses
 CLIENT_ID = (SETTINGS.get("spotify_client_id") or "").strip()
 REDIRECT = "http://127.0.0.1:8766/callback"  # must match the Redirect URI in your Spotify app exactly
 SCOPES = "user-read-playback-state user-modify-playback-state"
-TOKEN_FILE = HERE / ".spotify-token"
+TOKEN_FILE = DATA / ".spotify-token"
 
 if not CLIENT_ID:
     sys.exit('Put your Spotify app\'s Client ID in settings.json as "spotify_client_id" first (see the README).')
@@ -71,5 +71,7 @@ req = urllib.request.Request("https://accounts.spotify.com/api/token", data=urle
     headers={"Content-Type": "application/x-www-form-urlencoded"})
 with urllib.request.urlopen(req, timeout=20) as r:
     tokens = json.load(r)
-TOKEN_FILE.write_text(json.dumps({"refresh_token": tokens["refresh_token"]}), encoding="utf-8")
+tmp = TOKEN_FILE.with_suffix(".tmp")
+tmp.write_text(json.dumps({"refresh_token": tokens["refresh_token"]}), encoding="utf-8")
+os.replace(tmp, TOKEN_FILE)
 print("Connected to Spotify. Restart the helper (deck_server.py) so it starts using it.")

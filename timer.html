@@ -234,14 +234,14 @@
           $("drain").style.width = (S.tSet ? left / S.tSet * 100 : 0) + "%";
           $("count").classList.toggle("paused", !running());
         } else if (moveWheels) {
-          picked = hms(S.tSet); wH.set(picked[0]); wM.set(picked[1]); wS.set(picked[2]);
+          picked = hms(S.tSet); wH.set(picked[0], true); wM.set(picked[1], true); wS.set(picked[2], true);
         }
         put($("go"), running() ? "Pause" : paused() ? "Resume" : "Start");
         $("go").classList.toggle("stop", running());
         put($("reset"), "Reset"); $("reset").hidden = false;
         put($("msg"), err || (running() ? "Keeps running on the deck" : paused() ? "Paused" : S.tSet ? "Timer for <b>" + words(S.tSet) + "</b>" : "Flick the wheels, or tap a quick start"));
       } else {
-        if (moveWheels) { var p = aParts(); aH.set(p[0]); aM.set(p[1]); aP.set(p[2]); }
+        if (moveWheels) { var p = aParts(); aH.set(p[0], true); aM.set(p[1], true); aP.set(p[2], true); }
         put($("go"), S.aOn ? "Turn off" : "Turn on");
         $("go").classList.toggle("stop", S.aOn);
         $("reset").hidden = true;

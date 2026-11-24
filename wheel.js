@@ -2,10 +2,11 @@
 // It's a snapping scroll list: flick it, or tap a row to bring it to the middle.
 // onPick(i) runs once it settles. set(i) moves it without calling onPick.
 // commit() takes the row in the middle right now (call it before Save or Start); cancel() drops a pending pick.
+// set(i, true) moves it even mid-flick and drops the flick's pick: for buttons (a preset, Reset) that must win.
 // H is the row height in px (the page's CSS must give the rows that height).
 function Wheel(box, labels, onPick, H) {
   H = H || 76;
-  var rows = [], settle, busy = false, value = 0;
+  var rows = [], settle, busy = false, value = 0, held = 0;
   box.innerHTML = "";
   function pad() { box.appendChild(document.createElement("div")); }
   pad(); pad();
@@ -22,6 +23,10 @@ function Wheel(box, labels, onPick, H) {
   }
   box.addEventListener("scroll", function () {
     if (!box.offsetParent) return;  // hiding a wheel resets its scroll to the top: that isn't a pick
+    if (Date.now() < held) {  // a button just set this wheel: leftover flick movement is undone, not picked
+      if (Math.abs(box.scrollTop - value * H) > 1) box.scrollTop = value * H;
+      return;
+    }
     busy = true; paint();
     clearTimeout(settle);
     settle = setTimeout(function () {
@@ -44,7 +49,19 @@ function Wheel(box, labels, onPick, H) {
     if (i !== value) { value = i; onPick(i); }
   }
   return {
-    set: function (i) { if (busy) return; value = i; box.scrollTop = i * H; paint(); },
+    set: function (i, force) {
+      if (busy && !force) return;  // a redraw mustn't yank a wheel you're flicking
+      clearTimeout(settle); settle = null; busy = false;
+      value = i;
+      if (force) {
+        // stop a flick that's still coasting: turning scrolling off for a moment ends its momentum,
+        // and anything it still scrolls in the next 0.6 s is put back instead of counting as a pick
+        box.style.overflowY = "hidden";
+        held = Date.now() + 600;
+        setTimeout(function () { box.style.overflowY = ""; box.scrollTop = value * H; paint(); }, 60);
+      }
+      box.scrollTop = i * H; paint();
+    },
     commit: commit,
     cancel: function () { clearTimeout(settle); settle = null; busy = false; },
     get busy() { return busy; }

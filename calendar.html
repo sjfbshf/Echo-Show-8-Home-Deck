@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;500;650&display=swap" rel="stylesheet">
 <script src="config.js"></script>
 <script src="wheel.js"></script>
+<script src="alarm.js"></script>
 <style>
   /* A calendar with no sign-in on the Echo: it reads Google Calendar's "secret address in iCal format"
      (listed under "calendars" in settings.json on the PC, copied here by sync_echo.py) plus US holidays.
@@ -212,10 +213,14 @@
     return { d: new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) };
   }
   function parseICS(text, c) {
-    var out = [], cur = null;
+    var out = [], cancels = [], cur = null;
     text.replace(/\r?\n[ \t]/g, "").split(/\r?\n/).forEach(function (line) {
       if (line === "BEGIN:VEVENT") cur = { ex: [], skip: {}, c: c };
-      else if (line === "END:VEVENT") { if (cur && cur.start && !isNaN(cur.start)) out.push(cur); cur = null; }
+      else if (line === "END:VEVENT") {
+        if (cur && cur.start && !isNaN(cur.start)) out.push(cur);
+        else if (cur && cur.recId && cur.uid) cancels.push(cur);  // "this one occurrence is cancelled", with no time of its own
+        cur = null;
+      }
       else if (cur) {
         var i = line.indexOf(":"); if (i < 0) return;
         var head = line.slice(0, i).split(";"), val = line.slice(i + 1), tz = (/;TZID="?([^;:"]+)/.exec(line.slice(0, i)) || [])[1];
@@ -234,7 +239,7 @@
     // a changed or cancelled single occurrence of a repeating event replaces that occurrence;
     // cancelled ones are only dropped after they've taken their slot out of the series
     var byUid = {}; out.forEach(function (e) { if (e.rule) byUid[e.uid] = e; });
-    out.forEach(function (e) { if (e.recId && byUid[e.uid]) byUid[e.uid].skip[e.recId] = 1; });
+    out.concat(cancels).forEach(function (e) { if (e.recId && byUid[e.uid]) byUid[e.uid].skip[e.recId] = 1; });
     return out.filter(function (e) { return e.status !== "CANCELLED"; });
   }
 
@@ -242,42 +247,55 @@
   // shortcut: covers DAILY/WEEKLY/MONTHLY/YEARLY with INTERVAL, COUNT, UNTIL, BYDAY (incl. "2TU", "-1FR"), BYMONTHDAY, BYMONTH.
   // BYSETPOS and hourly rules are not handled. Repeats are worked out on the event's own clock (its time zone, UTC,
   // or the Echo's), so a 3 PM meeting stays at 3 PM in its zone across daylight-saving changes.
-  function dayNo(d) { return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY); }
-  function fromDayNo(n, t) { var u = new Date(n * DAY); return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), t.getHours(), t.getMinutes(), t.getSeconds()); }
+  function dayNo(d) { return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY); }  // a local date's day number
+  function cDay(c) { return Math.floor(+c / DAY); }                                                      // a carrier's day number
+  function cOn(n, t) { return new Date(n * DAY + ((+t % DAY) + DAY) % DAY); }                            // day n, at t's clock time
   function list(v, f) { return v ? v.split(",").map(f || Number) : null; }
-  function fits(r, s, d, sn, dn) {
-    var iv = +(r.INTERVAL || 1), wd = d.getDay(), dim = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-    var byday = list(r.BYDAY, function (x) { var m = /^([+-]?\d+)?([A-Z]{2})$/.exec(x); return { n: +(m[1] || 0), wd: WD[m[2]] }; });
-    var bymd = list(r.BYMONTHDAY), bymo = list(r.BYMONTH);
-    if (bymo && bymo.indexOf(d.getMonth() + 1) < 0) return false;
-    function onDay() { return byday.some(function (b) { return b.wd === wd && (!b.n || (b.n > 0 ? Math.ceil(d.getDate() / 7) === b.n : Math.ceil((dim - d.getDate() + 1) / 7) === -b.n)); }); }
-    function onDate(def) { return (bymd || [def]).some(function (m) { return d.getDate() === (m > 0 ? m : dim + m + 1); }); }
-    var months = (d.getFullYear() - s.getFullYear()) * 12 + d.getMonth() - s.getMonth();
+  // the rule's parts, read once per event (not on every day of every redraw). A part that can't be read,
+  // like a garbled weekday, is left out instead of breaking the whole calendar.
+  function rule(e) {
+    if (e._r) return e._r;
+    var r = e.rule, byday = list(r.BYDAY, function (x) {
+      var m = /^([+-]?\d+)?([A-Z]{2})$/.exec(x.trim());
+      return m && m[2] in WD ? { n: +(m[1] || 0), wd: WD[m[2]] } : null;
+    });
+    if (byday) byday = byday.filter(Boolean);
+    var num = function (x) { return +x; }, ok = function (a) { return a && a.filter(function (x) { return isFinite(x) && x; }); };
+    return (e._r = { iv: Math.max(1, +(r.INTERVAL || 1) || 1), byday: byday, bymd: ok(list(r.BYMONTHDAY, num)), bymo: ok(list(r.BYMONTH, num)), wkst: WD[r.WKST] != null ? WD[r.WKST] : 1 });
+  }
+  function fits(e, s, d, sn, dn) {
+    var r = e.rule, q = rule(e), iv = q.iv, byday = q.byday, bymd = q.bymd, bymo = q.bymo;
+    var wd = d.getUTCDay(), date = d.getUTCDate(), dim = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    if (bymo && bymo.length && bymo.indexOf(d.getUTCMonth() + 1) < 0) return false;
+    function onDay() { return byday.some(function (b) { return b.wd === wd && (!b.n || (b.n > 0 ? Math.ceil(date / 7) === b.n : Math.ceil((dim - date + 1) / 7) === -b.n)); }); }
+    function onDate(def) { return (bymd && bymd.length ? bymd : [def]).some(function (m) { return date === (m > 0 ? m : dim + m + 1); }); }
+    var months = (d.getUTCFullYear() - s.getUTCFullYear()) * 12 + d.getUTCMonth() - s.getUTCMonth();
+    var hasMd = bymd && bymd.length;
     switch (r.FREQ) {
-      case "DAILY": return (dn - sn) % iv === 0 && (!byday || onDay()) && (!bymd || onDate());
+      case "DAILY": return (dn - sn) % iv === 0 && (!byday || onDay()) && (!hasMd || onDate());
       case "WEEKLY":
-        var ws = WD[r.WKST || "MO"], w0 = sn - (s.getDay() - ws + 7) % 7, w1 = dn - (wd - ws + 7) % 7;
-        return ((w1 - w0) / 7) % iv === 0 && (byday ? onDay() : wd === s.getDay()) && (!bymd || onDate());
-      case "MONTHLY": return months % iv === 0 && (byday ? onDay() && (!bymd || onDate()) : onDate(s.getDate()));
+        var w0 = sn - (s.getUTCDay() - q.wkst + 7) % 7, w1 = dn - (wd - q.wkst + 7) % 7;
+        return ((w1 - w0) / 7) % iv === 0 && (byday ? onDay() : wd === s.getUTCDay()) && (!hasMd || onDate());
+      case "MONTHLY": return months % iv === 0 && (byday ? onDay() && (!hasMd || onDate()) : onDate(s.getUTCDate()));
       case "YEARLY":
-        if ((d.getFullYear() - s.getFullYear()) % iv || (!bymo && d.getMonth() !== s.getMonth())) return false;
-        return byday ? onDay() && (!bymd || onDate()) : onDate(s.getDate());
+        if ((d.getUTCFullYear() - s.getUTCFullYear()) % iv || (!(bymo && bymo.length) && d.getUTCMonth() !== s.getUTCMonth())) return false;
+        return byday ? onDay() && (!hasMd || onDate()) : onDate(s.getUTCDate());
     }
     return false;
   }
-  // the event's clock: its start's date and time as they read in its own zone (a plain local Date that just carries them)
+  // the event's clock reading as a carrier: its start's date and time in its own zone (or the Echo's, for
+  // all-day and "floating" events)
   function wallOf(e) {
-    var t = +e.start;
-    if (e.zone === "UTC") { var u = new Date(t); return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), u.getUTCHours(), u.getUTCMinutes(), u.getUTCSeconds()); }
-    if (e.zone) try { var z = new Date(t + tzAhead(t, e.zone)); return new Date(z.getUTCFullYear(), z.getUTCMonth(), z.getUTCDate(), z.getUTCHours(), z.getUTCMinutes(), z.getUTCSeconds()); } catch (x) {}
-    return new Date(t);
+    var t = +e.start, d = e.start;
+    if (e.zone === "UTC") return new Date(t);
+    if (e.zone) try { return new Date(t + tzAhead(t, e.zone)); } catch (x) {}
+    return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()));
   }
-  // the real moment that a clock reading (a wall Date as above) means in the event's zone
-  function instant(w, zone) {
-    var wall = Date.UTC(w.getFullYear(), w.getMonth(), w.getDate(), w.getHours(), w.getMinutes(), w.getSeconds());
-    if (zone === "UTC") return new Date(wall);
-    if (zone) try { return new Date(wall - tzAhead(wall - tzAhead(wall, zone), zone)); } catch (x) {}
-    return w;
+  // the real moment a carrier's clock reading means in the event's zone
+  function instant(c, zone) {
+    if (zone === "UTC") return new Date(+c);
+    if (zone) try { var wall = +c; return new Date(wall - tzAhead(wall - tzAhead(wall, zone), zone)); } catch (x) {}
+    return new Date(c.getUTCFullYear(), c.getUTCMonth(), c.getUTCDate(), c.getUTCHours(), c.getUTCMinutes(), c.getUTCSeconds());
   }
   // every occurrence of an event that overlaps [from, to)
   function occurrences(e, from, to) {
@@ -289,23 +307,30 @@
       if (+s < +to && Math.max(+end, +s + 1) > +from) out.push({ s: s, e: end, ev: e });
     }
     if (!e.rule) { add(e.start); return out; }
-    var r = e.rule, w = wallOf(e), sn = dayNo(w), max = r.COUNT ? +r.COUNT : Infinity, count = 0;
+    var r = e.rule, w = wallOf(e), sn = cDay(w), max = r.COUNT ? +r.COUNT : Infinity, count = 0;
     var until = r.UNTIL ? parseDate(r.UNTIL).d : null; if (until && r.UNTIL.length === 8) until = new Date(+until + DAY - 1);
     var span = e.allDay ? days : Math.ceil(len / DAY);
     var n = r.COUNT ? sn : Math.max(sn, dayNo(from) - span - 2);  // with COUNT we must count from the first one
     for (var end = dayNo(to) + 1; n <= end && count < max; n++) {
-      var d = fromDayNo(n, w), at = instant(d, e.zone);
+      var d = cOn(n, w);
+      if (!fits(e, w, d, sn, n)) continue;  // cheap check first; the time-zone sums only for days that fit
+      var at = instant(d, e.zone);
       if (until && at > until) break;
-      if (!fits(r, w, d, sn, n)) continue;
       count++;
       if (e.ex.indexOf(+at) < 0 && !e.skip[+at]) add(at);
     }
     return out;
   }
+  // occurrences in a range, remembered until the events change (tapping days redraws the same month again and again)
+  var memo = {};
   function between(from, to) {
+    var key = +from + "|" + +to;
+    if (memo[key]) return memo[key];
     var all = [];
-    EVENTS.forEach(function (e) { all = all.concat(occurrences(e, from, to)); });
-    return all.sort(function (a, b) { return (b.ev.allDay ? 1 : 0) - (a.ev.allDay ? 1 : 0) || a.s - b.s; });
+    EVENTS.forEach(function (e) {
+      try { all = all.concat(occurrences(e, from, to)); } catch (x) {}  // one broken event never hides the rest
+    });
+    return (memo[key] = all.sort(function (a, b) { return (b.ev.allDay ? 1 : 0) - (a.ev.allDay ? 1 : 0) || a.s - b.s; }));
   }
   function onDay(occ, day) {  // occurrences touching this local day
     var a = +day, b = +new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
@@ -392,8 +417,11 @@
     });
   }
   function rebuild() {
-    EVENTS = [];
-    FEEDS.forEach(function (f) { var t = localStorage.getItem(slot(f.url)); if (t) EVENTS = EVENTS.concat(parseICS(t, f.c)); });
+    EVENTS = []; memo = {};
+    FEEDS.forEach(function (f) {
+      var t = localStorage.getItem(slot(f.url));
+      try { if (t) EVENTS = EVENTS.concat(parseICS(t, f.c)); } catch (x) {}  // an unreadable feed is skipped, not fatal
+    });
     mineList().forEach(function (e) { EVENTS.push({ title: e.title, start: new Date(e.at), c: "#f2b84b", ex: [], skip: {}, own: e }); });
     draw();
   }
@@ -502,8 +530,7 @@
   rebuild(); load();
   setInterval(load, 30 * 60000);
 
-  // timer and alarm keep running (and ring) on this page too
-  var js = document.createElement("script"); js.src = "alarm.js"; document.body.appendChild(js);
+  // (the timer, alarm and reminders keep running here too: alarm.js is loaded in the page's head, before anything else)
 
   // same fit as the deck: designed at 1280x800, shrunk to the Echo's ~853x533
   function fit() {

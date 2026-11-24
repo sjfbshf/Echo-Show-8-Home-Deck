@@ -310,7 +310,7 @@
   function pc(path) {
     var stop = new AbortController(); setTimeout(function () { stop.abort(); }, 4000);
     return fetch(DECK.pc + path + "?k=" + encodeURIComponent(DECK.key), { method: "POST", signal: stop.signal })
-      .then(function (r) { if (!r.ok) { say("PC said no (" + r.status + ")", "bad"); throw r; } return r; },
+      .then(function (r) { if (!r.ok) { say(r.status === 502 ? "Couldn't open that on your PC" : "PC said no (" + r.status + ")", "bad"); throw r; } return r; },
             function (e) { say("Can't reach your PC. Is it on?", "bad"); throw e; });
   }
 
@@ -421,13 +421,18 @@
     var w = img.naturalWidth, h = img.naturalHeight, r = Math.max(c.width / w, c.height / h), sw = c.width / r, sh = c.height / r;
     try { c.getContext("2d").drawImage(img, (w - sw) / 2, (h - sh) / 2, sw, sh, 0, 0, c.width, c.height); } catch (e) {}
   }
+  // one request at a time (a slow answer can't arrive after a newer one and undo it), and the card only
+  // gives up after 3 missed answers in a row, so a hiccup on the Wi-Fi doesn't close the full-screen player
+  var npBusy = false, npMisses = 0;
   function loadNow() {
-    if (document.hidden) return;
+    if (document.hidden || npBusy) return;
+    npBusy = true;
     var stop = new AbortController(); setTimeout(function () { stop.abort(); }, 2500);
     fetch(DECK.pc + "/nowplaying?k=" + encodeURIComponent(DECK.key), { signal: stop.signal })
       .then(function (r) { if (!r.ok) throw r; return r.json(); })
-      .then(function (n) { NP = n; npAt = Date.now(); drawNow(); })
-      .catch(function () { NP = null; drawNow(); });  // PC off or asleep: show "Nothing playing"
+      .then(function (n) { NP = n; npAt = Date.now(); npMisses = 0; drawNow(); })
+      .catch(function () { if (++npMisses >= 3) { NP = null; drawNow(); } })  // PC off or asleep: "Nothing playing"
+      .then(function () { npBusy = false; });
   }
   // skip and jump: sent to the PC helper, which passes them to Windows' media controls
   function npSend(path) {

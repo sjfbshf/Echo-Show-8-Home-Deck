@@ -1,12 +1,12 @@
-"""Home Deck helper.
+r"""Home Deck helper.
 
 Opens apps on this PC when a PC pad on the Echo is tapped. The deck pages
 themselves live on the Echo (sync_echo.py copies them there), so the Echo
 works with this PC off. It only opens what is listed in pads.json, and only
-for requests that carry the secret key in .deck-key.
+for requests that carry the secret key in %USERPROFILE%\.homedeck\.deck-key.
 
 Run:  python deck_server.py
-(At login it starts hidden via a Startup shortcut; its link is then in deck.log.)
+(At login it starts hidden via a Startup shortcut; its log is then %USERPROFILE%\.homedeck\deck.log.)
 """
 import ctypes
 import json
@@ -20,7 +20,9 @@ import sys
 import threading
 import unicodedata
 import time
+import urllib.error
 import urllib.request
+from collections import OrderedDict
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,9 +31,24 @@ from urllib.parse import parse_qs, urlencode, urlparse
 HERE = Path(__file__).parent
 PORT = 8765
 
+# The deck key, the Spotify sign-in, Claude usage, the log and the cover picture live in a folder on this PC only
+# (%USERPROFILE%\.homedeck), not next to the code, which may be in a folder OneDrive or Dropbox uploads.
+# (Not AppData\Local: Python from the Microsoft Store / Python Install Manager gets a private copy of that folder,
+# so files put there by other programs can be invisible to it.)
+DATA = Path.home() / ".homedeck"
+DATA.mkdir(parents=True, exist_ok=True)
+for _name in (".deck-key", ".spotify-token", "usage.json", "deck.log", "nowplaying-art.bin"):
+    if (HERE / _name).exists() and not (DATA / _name).exists():  # move them from where older versions kept them
+        try:
+            shutil.move(str(HERE / _name), str(DATA / _name))
+        except OSError:
+            pass
+
 PADS = json.loads((HERE / "pads.json").read_text(encoding="utf-8"))
-# your own settings (weather place, calendar links, adb); settings.example.json is the template
-SETTINGS = json.loads(((HERE / "settings.json") if (HERE / "settings.json").exists() else (HERE / "settings.example.json")).read_text(encoding="utf-8"))
+# your own settings (weather place, calendar links, adb); settings.example.json is the template. settings.json can sit
+# in %USERPROFILE%\.homedeck (best if this folder is synced to the cloud: it holds your calendar links) or here.
+SETTINGS_FILE = next((f for f in (DATA / "settings.json", HERE / "settings.json") if f.exists()), HERE / "settings.example.json")
+SETTINGS = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
 ALL = PADS["left"] + PADS["right"]
 PC_PADS = [p for p in ALL if "pc" in p]
 ACTIONS = {p["id"]: p["pc"] for p in PC_PADS}
@@ -63,6 +80,20 @@ for _f, _args in {"GetWindowThreadProcessId": [_wt.HWND, ctypes.c_void_p], "IsWi
                   "SendMessageTimeoutW": [_wt.HWND, _wt.UINT, _wt.WPARAM, _wt.LPARAM, _wt.UINT, _wt.UINT, ctypes.c_void_p]}.items():
     getattr(_u32, _f).argtypes = _args  # 64-bit window handles must not be cut down to 32 bits
 _u32.GetWindowThreadProcessId.restype = _wt.DWORD
+_k32.OpenProcess.argtypes, _k32.OpenProcess.restype = [_wt.DWORD, _wt.BOOL, _wt.DWORD], _wt.HANDLE
+_k32.QueryFullProcessImageNameW.argtypes = [_wt.HANDLE, _wt.DWORD, _wt.LPWSTR, ctypes.POINTER(_wt.DWORD)]
+_k32.CloseHandle.argtypes = [_wt.HANDLE]
+
+
+class _LastInput(ctypes.Structure):
+    _fields_ = [("cbSize", _wt.UINT), ("dwTime", _wt.DWORD)]
+
+
+def last_input():
+    """When the last key or click happened (any program's), in ms since Windows started."""
+    li = _LastInput(ctypes.sizeof(_LastInput), 0)
+    _u32.GetLastInputInfo(ctypes.byref(li))
+    return li.dwTime
 _u32.GetForegroundWindow.restype = _wt.HWND
 _u32.GetWindow.restype = _wt.HWND
 
@@ -73,10 +104,12 @@ def _exe_of(hwnd):
     h = _k32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
     if not h:
         return ""
-    buf, size = ctypes.create_unicode_buffer(260), _wt.DWORD(260)
-    ok = _k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size))
-    _k32.CloseHandle(h)
-    return buf.value.rsplit("\\", 1)[-1].lower() if ok else ""
+    try:
+        buf, size = ctypes.create_unicode_buffer(32768), _wt.DWORD(32768)  # room for very long install paths
+        ok = _k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size))
+        return buf.value.rsplit("\\", 1)[-1].lower() if ok else ""
+    finally:
+        _k32.CloseHandle(h)
 
 
 def app_windows(exe):
@@ -116,48 +149,77 @@ def to_front(hwnd):
 
 
 def keep_in_front(hwnd, was_front):
-    """Bring hwnd to the front and keep it there for 2.5 s against the window that was in front before
-    (some apps, Brave for one, take the focus back a moment later). Clicking anything else is left alone."""
+    """Bring hwnd to the front. For 2.5 s, if the window that was in front before takes the focus back on its own
+    (Brave does this), put hwnd back. The moment you press a key or click anything, it stops and leaves you alone.
+    Returns True (in front), False (couldn't) or None (you did something else meanwhile)."""
     for _ in range(3):
         if to_front(hwnd):
             break
         time.sleep(0.2)
     else:
         return False
-    fixes, end = 0, time.time() + 2.5
+    mark, fixes, end = last_input(), 0, time.time() + 2.5  # to_front's own key press is the last input now
     while time.time() < end and fixes < 2:
         time.sleep(0.15)
-        now = _u32.GetForegroundWindow()
-        if now == was_front:  # the old window grabbed it back, not something you chose
+        if last_input() != mark:  # you typed or clicked: your choice wins
+            return None
+        if _u32.GetForegroundWindow() == was_front:
             fixes += 1
             to_front(hwnd)
+            mark = last_input()
     return _u32.GetForegroundWindow() == hwnd
 
 
-def open_in_front(target, exe, reuse=False):
-    was_front = _u32.GetForegroundWindow()
-    before = app_windows(exe) if exe else []
-    if reuse and before:  # "reuse": just bring back the window that's already open (Terminal would make a new one each time)
-        if not keep_in_front(before[0], was_front):
-            print(f"Couldn't bring {exe} to the front (in front: {_exe_of(_u32.GetForegroundWindow()) or 'unknown'})")
-        return
-    before = set(before)
-    os.startfile(target)  # Windows: opens the app, URI or link like double-clicking it
-    if not exe:
-        return
-    end = time.time() + 6
-    while time.time() < end:
-        time.sleep(0.2)
-        wins = app_windows(exe)
-        new = [w for w in wins if w not in before]
-        # a brand-new window wins; an app that was already open (it just shows itself) uses its front window
-        pick = new[0] if new else (wins[0] if wins and time.time() > end - 4.5 else None)
-        if pick and keep_in_front(pick, was_front):
+BUSY, BUSY_LOCK = set(), threading.Lock()  # pads being opened right now: a second quick tap doesn't open another
+
+
+def start_pad(pad, target):
+    """Open a pad's app. Returns False if Windows couldn't open it; bringing it forward carries on in the background."""
+    exe, reuse = WINDOWS.get(pad), pad in REUSE
+    with BUSY_LOCK:
+        if pad in BUSY:
+            return True
+        BUSY.add(pad)
+    try:
+        was_front = _u32.GetForegroundWindow()
+        before = app_windows(exe) if exe else []
+        if not (reuse and before):  # "reuse": bring back the open window instead (Terminal opens a new one each time)
+            os.startfile(target)  # Windows: opens the app, URI or link like double-clicking it
+    except OSError as e:
+        print(f"Couldn't open {pad}: {e.strerror or type(e).__name__}")
+        with BUSY_LOCK:
+            BUSY.discard(pad)
+        return False
+    threading.Thread(target=bring_forward, args=(pad, exe, reuse, before, was_front), daemon=True).start()
+    return True
+
+
+def bring_forward(pad, exe, reuse, before, was_front):
+    try:
+        if not exe:
             return
-    print(f"Couldn't bring {exe} to the front (in front: {_exe_of(_u32.GetForegroundWindow()) or 'unknown'})")
+        if reuse and before:
+            if keep_in_front(before[0], was_front) is False:
+                print(f"Couldn't bring {exe} to the front (in front: {_exe_of(_u32.GetForegroundWindow()) or 'unknown'})")
+            return
+        before, end = set(before), time.time() + 6
+        while time.time() < end:
+            time.sleep(0.2)
+            wins = app_windows(exe)
+            new = [w for w in wins if w not in before]
+            # a brand-new window wins; an app that was already open (it just shows itself) uses its front window
+            pick = new[0] if new else (wins[0] if wins and time.time() > end - 4.5 else None)
+            if pick:
+                got = keep_in_front(pick, was_front)
+                if got is not False:  # in front, or you moved on to something else: done either way
+                    return
+        print(f"Couldn't bring {exe} to the front (in front: {_exe_of(_u32.GetForegroundWindow()) or 'unknown'})")
+    finally:
+        with BUSY_LOCK:
+            BUSY.discard(pad)
 
 
-KEY_FILE = HERE / ".deck-key"
+KEY_FILE = DATA / ".deck-key"
 if not KEY_FILE.exists() or len(KEY_FILE.read_text().strip()) < 16:
     # a missing, empty or too-short key would let anyone in, so make a fresh one (then run sync_echo.py again)
     KEY_FILE.write_text(secrets.token_urlsafe(18))
@@ -193,9 +255,9 @@ def refresh_usage():
         u = json.load(r)
     pick = lambda w: w and {"percent": w.get("utilization") or 0, "resets_at": w.get("resets_at")}
     out = {"updated": datetime.now(timezone.utc).isoformat(), "five_hour": pick(u.get("five_hour")), "weekly": pick(u.get("seven_day"))}
-    tmp = HERE / "usage.json.tmp"  # written aside, then swapped in whole, so /usage never reads half a file
+    tmp = DATA / "usage.json.tmp"  # written aside, then swapped in whole, so /usage never reads half a file
     tmp.write_text(json.dumps(out), encoding="utf-8")
-    os.replace(tmp, HERE / "usage.json")
+    os.replace(tmp, DATA / "usage.json")
     return out
 
 
@@ -213,23 +275,39 @@ def usage_loop():
 NOW = {"playing": False}
 NP_PROC = None  # the running nowplaying.ps1; the deck's skip keys and progress line send it commands
 NP_LOCK = threading.Lock()  # one command at a time, so two taps can't mix their lines
-ART = HERE / "nowplaying-art.bin"
+ART = DATA / "nowplaying-art.bin"
 
 
 # Covers and lengths for songs Windows knows nothing about (Spotify read from its window title), found with
 # Deezer's or Apple's free search. Only the artist and song name are sent.
 # SONGS: {"artist|song": {"no": cover number or 0, "len": seconds or 0, "tried": when}}; COVER_IMG: {cover number: image}.
-# The deck asks /art?v=<number>, so it always gets the picture that belongs to the song it shows.
-SONGS, COVER_IMG = {}, {}
-COVER_NO = iter(range(1000, 10**9))  # cover numbers from 1000 never clash with nowplaying.ps1's
+# The deck asks /art?v=<id>, so it always gets the picture that belongs to the song it shows. Ids are "c<n>" for
+# covers kept here and "w<n>" for the one Windows gave (nowplaying.ps1's file), so the two can never be mixed up.
+SONGS, COVER_IMG = OrderedDict(), OrderedDict()  # both bounded: oldest dropped first
+COVER_NO = iter(range(1, 10**12))
+CACHE_LOCK = threading.Lock()
+
+
+def keep_cover(img):
+    """Store a cover picture and return its id. Only the 80 newest are kept."""
+    with CACHE_LOCK:
+        cid = f"c{next(COVER_NO)}"
+        COVER_IMG[cid] = img
+        while len(COVER_IMG) > 80:
+            COVER_IMG.popitem(last=False)
+        return cid
 
 
 def song_info(artist, title):
     """What's known about this song so far. Searched in the background; a miss is tried again after 5 minutes."""
     key = f"{artist}|{title}"
     info = SONGS.get(key) or {"no": 0, "len": 0, "tried": 0}
+    if info["no"] and info["no"] not in COVER_IMG:  # its picture was dropped from the cache: fetch it again
+        info = {"no": 0, "len": info["len"], "tried": 0}
     if not info["no"] and time.time() - info["tried"] > 300:
-        info = SONGS[key] = {"no": 0, "len": 0, "tried": time.time()}
+        info = SONGS[key] = {"no": 0, "len": info["len"], "tried": time.time()}
+        while len(SONGS) > 300:  # misses are remembered too, but not forever
+            SONGS.popitem(last=False)
         threading.Thread(target=fetch_song, args=(key, artist, title), daemon=True).start()
     return info
 
@@ -270,17 +348,9 @@ def fetch_song(key, artist, title):
         if found:
             with urllib.request.urlopen(found[0], timeout=10) as r:
                 img = r.read()
-            no = next(COVER_NO)
-            COVER_IMG[no] = img
-            SONGS[key] = {"no": no, "len": found[1], "tried": time.time()}
+            SONGS[key] = {"no": keep_cover(img), "len": found[1], "tried": time.time()}
     except Exception as e:
         print(f"No cover found: {type(e).__name__}")
-    if len(COVER_IMG) > 100:  # forget old songs' pictures
-        for n in sorted(COVER_IMG)[:50]:
-            COVER_IMG.pop(n, None)
-        for k, v in list(SONGS.items()):
-            if v["no"] and v["no"] not in COVER_IMG:
-                SONGS.pop(k, None)
 
 
 # Spotify read from its window title gives no position, so the helper keeps its own clock: time played since the
@@ -305,23 +375,35 @@ def spotify_position(key, playing):
 # exact position, length and cover from Spotify itself, and the deck can jump in it (that needs Premium).
 # Only a renewal token is kept, in .spotify-token; nothing is stored in settings.json but the app's public Client ID.
 SP_ID = (SETTINGS.get("spotify_client_id") or "").strip()
-SP_TOKEN_FILE = HERE / ".spotify-token"
-SP = {"access": None, "until": 0.0, "state": None, "at": 0.0, "seek_ok": True, "art": {}}
+SP_TOKEN_FILE = DATA / ".spotify-token"
+SP = {"access": None, "until": 0.0, "state": None, "at": 0.0, "seek_ok": True, "art": {}, "device": None, "dead": False}
+SP_LOCK = threading.Lock()  # one token renewal at a time
 
 
 def sp_access():
-    if SP["access"] and time.time() < SP["until"] - 60:
+    with SP_LOCK:
+        if SP["access"] and time.time() < SP["until"] - 60:
+            return SP["access"]
+        if SP["dead"]:
+            raise RuntimeError("Spotify needs signing in again")
+        refresh = json.loads(SP_TOKEN_FILE.read_text(encoding="utf-8"))["refresh_token"]
+        req = urllib.request.Request("https://accounts.spotify.com/api/token", data=urlencode({
+            "grant_type": "refresh_token", "refresh_token": refresh, "client_id": SP_ID}).encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                t = json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 401) and b"invalid_grant" in e.read():  # removed, or unused for months: retrying won't help
+                SP["dead"] = True
+                print("Spotify's sign-in has expired or was removed. Run: python spotify_login.py, then restart the helper.")
+            raise
+        if t.get("refresh_token"):  # Spotify may hand out a new renewal token; keep the newest (written whole)
+            tmp = SP_TOKEN_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"refresh_token": t["refresh_token"]}), encoding="utf-8")
+            os.replace(tmp, SP_TOKEN_FILE)
+        SP["access"], SP["until"] = t["access_token"], time.time() + t.get("expires_in", 3600)
         return SP["access"]
-    refresh = json.loads(SP_TOKEN_FILE.read_text(encoding="utf-8"))["refresh_token"]
-    req = urllib.request.Request("https://accounts.spotify.com/api/token", data=urlencode({
-        "grant_type": "refresh_token", "refresh_token": refresh, "client_id": SP_ID}).encode(),
-        headers={"Content-Type": "application/x-www-form-urlencoded"})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        t = json.load(r)
-    if t.get("refresh_token"):  # Spotify may hand out a new renewal token; keep the newest
-        SP_TOKEN_FILE.write_text(json.dumps({"refresh_token": t["refresh_token"]}), encoding="utf-8")
-    SP["access"], SP["until"] = t["access_token"], time.time() + t.get("expires_in", 3600)
-    return SP["access"]
 
 
 def sp_call(method, path, query=None):
@@ -338,18 +420,22 @@ def sp_call(method, path, query=None):
 
 def sp_cover(url):
     """A number for Spotify's cover picture (fetched once), for /art?v=."""
-    if url not in SP["art"]:
+    cid = SP["art"].get(url)
+    if not cid or cid not in COVER_IMG:  # new, or dropped from the cache since
         with urllib.request.urlopen(url, timeout=10) as r:
-            img = r.read()
-        no = next(COVER_NO)
-        COVER_IMG[no] = img
-        SP["art"][url] = no
-    return SP["art"][url]
+            cid = keep_cover(r.read())
+        SP["art"][url] = cid
+        if len(SP["art"]) > 200:
+            SP["art"] = {u: c for u, c in SP["art"].items() if c in COVER_IMG}
+    return cid
 
 
 def spotify_loop():
     """While Spotify is the one playing, ask it every 1.5 s what it's doing."""
     while True:
+        if SP["dead"]:  # signed out: nothing to ask until spotify_login.py is run again
+            time.sleep(60)
+            continue
         if NOW.get("keys"):
             try:
                 SP["state"], SP["at"] = sp_call("GET", "/me/player"), time.time()
@@ -366,9 +452,18 @@ def from_spotify(now):
     if not st or time.time() - SP["at"] > 5 or not st.get("item"):
         return False
     item = st["item"]
-    # only if it's the same song the window shows (it could be playing on your phone, say)
-    if plain(item.get("name", "")) != plain(now.get("title", "")):
+    # only the same song (name and artist) playing on this computer: not your phone, say
+    def same(a, b):
+        pa, pb = plain(a), plain(b)
+        return (pa == pb) if pa and pb else a.strip().lower() == b.strip().lower()  # names with no Latin letters
+    artists = [x.get("name", "") for x in item.get("artists") or []]
+    window_artist = now.get("artist", "").split(",")[0]
+    if not same(item.get("name", ""), now.get("title", "")) or not any(same(a, window_artist) for a in artists):
         return False
+    device = st.get("device") or {}
+    if device.get("type") != "Computer":
+        return False
+    SP["device"] = device.get("id")
     pos = (st.get("progress_ms") or 0) / 1000 + ((time.time() - SP["at"]) if st.get("is_playing") else 0)
     images = item.get("album", {}).get("images") or []
     try:
@@ -383,7 +478,10 @@ def from_spotify(now):
 
 def sp_seek(seconds):
     try:
-        sp_call("PUT", "/me/player/seek", {"position_ms": int(seconds * 1000)})
+        query = {"position_ms": int(seconds * 1000)}
+        if SP["device"]:
+            query["device_id"] = SP["device"]  # this PC, so a phone that just took over isn't moved
+        sp_call("PUT", "/me/player/seek", query)
         SP["at"] = 0  # ask again soon, so the card shows the new spot
     except Exception as e:
         if getattr(e, "code", 0) == 403:  # Spotify allows jumping only with Premium
@@ -404,15 +502,19 @@ def now_playing_loop():
                     now = json.loads(line)
                 except ValueError:
                     continue
-                if now.get("keys"):  # Spotify read from its window title: look up its cover and length, and keep time
-                    info = song_info(now.get("artist", ""), now.get("title", ""))
-                    pos = spotify_position(f"{now.get('artist')}|{now.get('title')}", True)
-                    if info["len"]:
-                        pos %= info["len"]  # on repeat, the same song starts over
-                    now.update(art=info["no"], length=round(info["len"], 1), position=round(pos, 1), estimated=True)
-                    from_spotify(now)  # exact details straight from Spotify, when connected
+                if now.get("keys"):  # Spotify read from its window title
+                    # exact details straight from Spotify when connected; otherwise look up the cover and length
+                    # (Deezer/iTunes only see the song's name when Spotify can't tell us) and keep time ourselves
+                    if not from_spotify(now):
+                        info = song_info(now.get("artist", ""), now.get("title", ""))
+                        pos = spotify_position(f"{now.get('artist')}|{now.get('title')}", True)
+                        if info["len"]:
+                            pos %= info["len"]  # on repeat, the same song starts over
+                        now.update(art=info["no"], length=round(info["len"], 1), position=round(pos, 1), estimated=True)
                 else:
                     spotify_position(None, False)  # Spotify paused or gone: stop its clock
+                    if now.get("art"):
+                        now["art"] = f"w{now['art']}"  # Windows' own picture
                 NOW = now  # swapped whole, so a request never sees half of it
             print("Now playing reader stopped; restarting it")
         except Exception as e:
@@ -422,6 +524,7 @@ def now_playing_loop():
 
 
 class Deck(BaseHTTPRequestHandler):
+    timeout = 15  # seconds to send the request; idle or stuck connections are closed
     def _authorized(self, query):
         given = query.get("k", [""])[0]
         return bool(given) and secrets.compare_digest(given, KEY)  # a missing or empty key never matches
@@ -448,17 +551,19 @@ class Deck(BaseHTTPRequestHandler):
         if not self._authorized(parse_qs(url.query)):
             return self._send(403, b"Wrong key")
         if url.path == "/usage":  # Claude usage for the deck's middle panel
-            f = HERE / "usage.json"
+            f = DATA / "usage.json"
             return self._send(200, f.read_bytes() if f.exists() else b"{}", "application/json")
         if url.path == "/nowplaying":
             return self._send(200, json.dumps(NOW).encode(), "application/json")
         if url.path == "/art":
+            v = parse_qs(url.query).get("v", [""])[0]
             try:
-                v = int(parse_qs(url.query).get("v", ["0"])[0])
-            except ValueError:
-                v = 0
-            try:
-                img = COVER_IMG[v] if v >= 1000 else ART.read_bytes()  # a looked-up cover, or the one Windows gave
+                if v.startswith("c"):
+                    img = COVER_IMG[v]
+                elif v.startswith("w") and v == NOW.get("art"):  # Windows' picture, only while it's still that one
+                    img = ART.read_bytes()
+                else:
+                    raise KeyError(v)
             except (KeyError, OSError):
                 return self._send(404, b"No picture")
             return self._send(200, img, "image/png" if img[:4] == b"\x89PNG" else "image/jpeg")
@@ -498,8 +603,8 @@ class Deck(BaseHTTPRequestHandler):
         target = ACTIONS.get(url.path.removeprefix("/run/"))
         if target is None:
             return self._send(404, b"Unknown pad")
-        pad = url.path.removeprefix("/run/")
-        threading.Thread(target=open_in_front, args=(target, WINDOWS.get(pad), pad in REUSE), daemon=True).start()
+        if not start_pad(url.path.removeprefix("/run/"), target):
+            return self._send(502, b"Couldn't open it")  # the deck then says so, instead of "Opened"
         self._send(204)
 
 
@@ -519,7 +624,10 @@ def lan_ip_or_none():
 
 if __name__ == "__main__":
     if sys.stderr is None:  # started hidden with pythonw at login: log to a file instead
-        sys.stdout = sys.stderr = open(HERE / "deck.log", "a", buffering=1, encoding="utf-8")
+        log = DATA / "deck.log"
+        if log.exists() and log.stat().st_size > 5_000_000:  # keep it from growing forever: one old copy is kept
+            os.replace(log, DATA / "deck.log.1")
+        sys.stdout = sys.stderr = open(log, "a", buffering=1, encoding="utf-8")
     ip = lan_ip_or_none()
     print(f"Home Deck helper is running at http://{ip}:{PORT} (the Echo's PC pads call it)." if ip
           else f"Home Deck helper is running on port {PORT} (no network yet).")

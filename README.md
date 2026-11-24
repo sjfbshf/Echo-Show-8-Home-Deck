@@ -31,7 +31,7 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
 ## Setup
 
 1. **Download this repo** to your PC.
-2. **Copy `settings.example.json` to `settings.json`** and fill it in:
+2. **Copy `settings.example.json` to `settings.json`** and fill it in. Put it in `%USERPROFILE%\.homedeck\` (made on the helper's first run) or next to the code. The first is better if this folder is synced to OneDrive or similar, since it holds your calendar links.
    - `weather`: your town's name, a short label (like a ZIP code), its latitude and longitude, and `"us"` (°F, mph) or `"metric"` (°C, km/h). You can find the coordinates on Google Maps: right-click a spot to copy them.
    - `calendars`: Google Calendar *secret iCal addresses*, if you want them (see below). Up to 4 get their own colour.
    - `claude_usage`: `false` hides the Claude usage panel.
@@ -46,7 +46,7 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
    - `reuse` (optional, with `window`): `true` brings back the app's open window instead of opening another one. The sample Terminal pad uses it, since Terminal opens a new window each time.
 4. **Start the PC helper:** `python deck_server.py`.
    - When Windows Firewall asks, allow Python on **private** networks.
-   - To start it hidden at every login, make a shortcut in `shell:startup` to `pythonw.exe "C:\path\to\deck_server.py"`. Its output then goes to `deck.log`.
+   - To start it hidden at every login, make a shortcut in `shell:startup` to `pythonw.exe "C:\path\to\deck_server.py"`. Its output then goes to `%USERPROFILE%\.homedeck\deck.log`.
 5. **Copy the deck to the screen:** plug it in by USB and run `python sync_echo.py`.
    - This copies the pages, makes Fully open the deck on start, and gives Fully permission to read them.
    - Setting Fully's start page needs root. On a normal tablet the script skips that step and tells you to set Fully's *Start URL* to `file:///sdcard/Android/data/de.ozerov.fully/files/home-deck/index.html` yourself, once.
@@ -108,7 +108,7 @@ Without this, a Spotify that doesn't share with Windows gets an estimated positi
 3. Run `python spotify_login.py`. Spotify's sign-in page opens in your browser: click **Agree**.
 4. Restart the PC helper.
 
-The sign-in only keeps a renewal token, in `.spotify-token` on your PC (git-ignored). To disconnect, delete that file, or remove the app at [spotify.com/account/apps](https://www.spotify.com/account/apps/).
+The sign-in only keeps a renewal token, in `%USERPROFILE%\.homedeck\.spotify-token`, on your PC only. If Spotify ever stops accepting it (it expires after months unused), the log says to run `spotify_login.py` again. To disconnect, delete that file, or remove the app at [spotify.com/account/apps](https://www.spotify.com/account/apps/).
 
 ### "Alexa, open sesame" (Echo only, optional)
 
@@ -132,12 +132,12 @@ To turn it off, run `adb uninstall com.homedeck.opensesame`.
   - Weather comes from [Open-Meteo](https://open-meteo.com/) (free, no key). The calendar reads iCal feeds directly, with its own repeat-event support.
 - **`deck_server.py` is the PC helper.** It's plain Python with no installs, and listens on port 8765.
   - It only opens apps listed in `pads.json`, presses media keys, and reads and moves what's playing through Windows' media controls.
-  - Every request has to carry a random key that it creates in `.deck-key` on first run, and it hides that key in its log.
+  - Every request has to carry a random key that it creates on first run, and it hides that key in its log.
 - **Built for a 1280×800 screen.** Pages shrink themselves to fit smaller screens.
 
 ## Safety notes
 
-- Never upload or share `settings.json`, `.deck-key`, `.spotify-token` or `deck.log`. They're already in `.gitignore`.
+- **Your private files live outside the code folder,** in `%USERPROFILE%\.homedeck\`: the deck key, the Spotify sign-in, Claude usage, the log and your `settings.json` if you put it there. So they're never uploaded with the code, and OneDrive or Dropbox don't copy them to the cloud if the code folder is synced. Never share them.
 - Anyone on your Wi-Fi who learns the key could open the listed apps, see what's playing and control it, but nothing else.
 - The screen talks to the PC over plain HTTP on your home network, so only use it on a Wi-Fi you trust, and allow the helper on **private** networks only.
 - The key is also saved on the screen (in `config.js`, in Fully's folder).

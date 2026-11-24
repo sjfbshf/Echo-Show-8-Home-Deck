@@ -15,7 +15,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from deck_server import HERE, KEY, PADS, PORT, SETTINGS, lan_ip
+from deck_server import HERE, KEY, PADS, PORT, SETTINGS, SETTINGS_FILE, lan_ip
 
 ADB = SETTINGS.get("adb") or shutil.which("adb")  # set "adb" in settings.json if adb isn't on your PATH
 if not ADB:
@@ -24,7 +24,7 @@ ECHO_DIR = "/sdcard/Android/data/de.ozerov.fully/files/home-deck"  # Fully's own
 START_URL = f"file://{ECHO_DIR}/index.html"
 PREFS = "/data/data/de.ozerov.fully/shared_prefs/de.ozerov.fully_preferences.xml"
 PAGES = ["index.html", "timer.html", "weather.html", "calendar.html", "google.html", "alarm.js", "wheel.js"]
-if not (HERE / "settings.json").exists():
+if SETTINGS_FILE.name != "settings.json":
     print("No settings.json yet, so using settings.example.json. Copy it to settings.json and fill in your own place.")
 
 
@@ -41,9 +41,14 @@ def main():
         tmp = Path(tmp)
         (tmp / "config.js").write_text("window.DECK = " + json.dumps(config) + ";\n", encoding="utf-8")
         (tmp / "pads.js").write_text("window.PADS = " + json.dumps(pads) + ";\n", encoding="utf-8")
-        adb("shell", f"mkdir -p {ECHO_DIR}")
-        for f in [HERE / p for p in PAGES] + [tmp / "config.js", tmp / "pads.js"]:
-            adb("push", str(f), f"{ECHO_DIR}/{f.name}")
+        new = ECHO_DIR + ".new"
+        adb("shell", f"rm -rf {new} && mkdir -p {new}")
+        files = [HERE / p for p in PAGES] + [tmp / "config.js", tmp / "pads.js"]
+        for f in files:
+            adb("push", str(f), f"{new}/{f.name}")
+        if adb("shell", f"ls {new} | wc -l").strip() != str(len(files)):
+            raise SystemExit("Not every file reached the Echo; the deck there wasn't changed. Run sync_echo.py again.")
+        adb("shell", f"rm -rf {ECHO_DIR}.old; [ -d {ECHO_DIR} ] && mv {ECHO_DIR} {ECHO_DIR}.old; mv {new} {ECHO_DIR} && rm -rf {ECHO_DIR}.old")
 
     # point Fully at the copy on the screen by editing its settings file while it's stopped.
     # That needs root (an unlocked Echo has it). On a normal tablet it's skipped and you set the Start URL once in Fully.
@@ -62,15 +67,24 @@ def main():
                 t.write(prefs.replace("\r\n", "\n"))
             try:
                 adb("push", t.name, "/data/local/tmp/fully.xml")
-                adb("shell", f"cat /data/local/tmp/fully.xml > {PREFS}")  # cat keeps the file's owner
+                # the new file goes next to the real one with the same owner, is checked, and only then replaces
+                # it in one step, so Fully's settings are never left half-written
+                who = adb("shell", f"stat -c %u:%g {PREFS}").strip()
+                adb("shell", f"cp /data/local/tmp/fully.xml {PREFS}.new && chown {who} {PREFS}.new && chmod 660 {PREFS}.new"
+                             f" && (restorecon {PREFS}.new 2>/dev/null; true)")
+                if START_URL not in adb("shell", f"cat {PREFS}.new") or "</map>" not in adb("shell", f"tail -c 20 {PREFS}.new"):
+                    raise RuntimeError("the new settings file didn't check out")
+                adb("shell", f"mv {PREFS}.new {PREFS}")
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"copying the settings failed ({(e.stderr or '').strip()[:80]})") from e
             finally:  # never leave copies of Fully's settings behind
                 Path(t.name).unlink(missing_ok=True)
-                subprocess.run([ADB, "shell", "rm -f /data/local/tmp/fully.xml"], capture_output=True)
-            if START_URL not in adb("shell", f"cat {PREFS}"):
-                raise RuntimeError("Fully's start page didn't save")
-    except (subprocess.CalledProcessError, RuntimeError) as e:
-        why = "Couldn't change Fully's start page" if isinstance(e, RuntimeError) else "No root, so Fully's start page wasn't changed"
-        print(f"{why}. In Fully, set Settings > Web Content > Start URL to:\n  {START_URL}")
+                subprocess.run([ADB, "shell", f"rm -f /data/local/tmp/fully.xml {PREFS}.new"], capture_output=True)
+    except subprocess.CalledProcessError:
+        print(f"No root, so Fully's start page wasn't changed. In Fully, set Settings > Web Content > Start URL to:\n  {START_URL}")
+    except RuntimeError as e:
+        print(f"Couldn't change Fully's start page: {e}. Its settings were left as they were.\n"
+              f"In Fully, set Settings > Web Content > Start URL to:\n  {START_URL}")
     # Fully asks for this once its start page is a file; granting it here skips the dialog
     try:
         adb("shell", "pm grant de.ozerov.fully android.permission.READ_EXTERNAL_STORAGE")
