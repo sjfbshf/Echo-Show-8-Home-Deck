@@ -35,6 +35,7 @@ SETTINGS = json.loads(((HERE / "settings.json") if (HERE / "settings.json").exis
 ALL = PADS["left"] + PADS["right"]
 PC_PADS = [p for p in ALL if "pc" in p]
 ACTIONS = {p["id"]: p["pc"] for p in PC_PADS}
+WINDOWS = {p["id"]: p["window"].lower() for p in PC_PADS if p.get("window")}  # program to bring to the front
 assert len(ACTIONS) == len(PC_PADS), "every PC pad needs its own unique id"
 assert all(p["url"].startswith("https://") or (HERE / p["url"]).is_file() for p in ALL if "pc" not in p), "Echo pads need an https:// link or a page in this folder"
 
@@ -45,6 +46,88 @@ MEDIA_KEYS = {"prev": 0xB1, "play": 0xB3, "next": 0xB0, "voldown": 0xAE, "volup"
 def press(vk):
     ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
     ctypes.windll.user32.keybd_event(vk, 0, 2, 0)  # 2 = key up
+
+
+# Bringing an opened app to the front. Windows doesn't let a background program (this helper) put another app's
+# window in front, so apps opened from the deck could appear behind whatever you were using. After opening one,
+# the helper finds its window (by the pad's "window": the program name, like "Obsidian.exe") and pulls it forward.
+from ctypes import wintypes as _wt
+_u32, _k32 = ctypes.windll.user32, ctypes.windll.kernel32
+_EnumProc = ctypes.WINFUNCTYPE(_wt.BOOL, _wt.HWND, _wt.LPARAM)
+for _f, _args in {"GetWindowThreadProcessId": [_wt.HWND, ctypes.c_void_p], "IsWindowVisible": [_wt.HWND], "GetWindowTextLengthW": [_wt.HWND],
+                  "GetWindow": [_wt.HWND, _wt.UINT], "GetWindowLongW": [_wt.HWND, ctypes.c_int], "IsIconic": [_wt.HWND],
+                  "ShowWindow": [_wt.HWND, ctypes.c_int], "BringWindowToTop": [_wt.HWND], "SetForegroundWindow": [_wt.HWND],
+                  "SetWindowPos": [_wt.HWND, _wt.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, _wt.UINT],
+                  "AttachThreadInput": [_wt.DWORD, _wt.DWORD, _wt.BOOL], "EnumWindows": [_EnumProc, _wt.LPARAM]}.items():
+    getattr(_u32, _f).argtypes = _args  # 64-bit window handles must not be cut down to 32 bits
+_u32.GetWindowThreadProcessId.restype = _wt.DWORD
+_u32.GetForegroundWindow.restype = _wt.HWND
+_u32.GetWindow.restype = _wt.HWND
+
+
+def _exe_of(hwnd):
+    pid = _wt.DWORD()
+    _u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    h = _k32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return ""
+    buf, size = ctypes.create_unicode_buffer(260), _wt.DWORD(260)
+    ok = _k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size))
+    _k32.CloseHandle(h)
+    return buf.value.rsplit("\\", 1)[-1].lower() if ok else ""
+
+
+def app_windows(exe):
+    """The app's main windows, frontmost first (visible, titled, not tool windows)."""
+    found = []
+
+    def each(hwnd, _):
+        if _u32.IsWindowVisible(hwnd) and _u32.GetWindowTextLengthW(hwnd) and not _u32.GetWindow(hwnd, 4) \
+                and not (_u32.GetWindowLongW(hwnd, -20) & 0x80) and _exe_of(hwnd) == exe:  # no owner, not WS_EX_TOOLWINDOW
+            found.append(hwnd)
+        return True
+    _u32.EnumWindows(_EnumProc(each), 0)
+    return found
+
+
+def to_front(hwnd):
+    if _u32.IsIconic(hwnd):
+        _u32.ShowWindow(hwnd, 9)  # SW_RESTORE: un-minimise
+    me, fg = _k32.GetCurrentThreadId(), _u32.GetWindowThreadProcessId(_u32.GetForegroundWindow(), None)
+    target = _u32.GetWindowThreadProcessId(hwnd, None)
+    # joining the input of the app in front lets this helper hand the focus over (the usual way around the rule)
+    for t in {fg, target} - {me}:
+        _u32.AttachThreadInput(me, t, True)
+    # Windows only lets the program that sent the last key or click choose the front window, so the helper
+    # "presses" key 0xE8, which no keyboard has and no app reacts to (unlike the usual trick, Alt, which opens menus)
+    _u32.keybd_event(0xE8, 0, 0, 0)
+    _u32.keybd_event(0xE8, 0, 2, 0)
+    _u32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x3)   # HWND_TOPMOST for a moment (SWP_NOMOVE | SWP_NOSIZE)...
+    _u32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x43)  # ...then back to normal, now on top (| SWP_SHOWWINDOW)
+    _u32.BringWindowToTop(hwnd)
+    _u32.SetForegroundWindow(hwnd)
+    for t in {fg, target} - {me}:
+        _u32.AttachThreadInput(me, t, False)
+    return _u32.GetForegroundWindow() == hwnd
+
+
+def open_in_front(target, exe):
+    before = set(app_windows(exe)) if exe else set()
+    os.startfile(target)  # Windows: opens the app, URI or link like double-clicking it
+    if not exe:
+        return
+    end = time.time() + 6
+    while time.time() < end:
+        time.sleep(0.2)
+        wins = app_windows(exe)
+        new = [w for w in wins if w not in before]
+        # a brand-new window (Terminal opens one each time) wins; an app that was already open uses its front window
+        pick = new[0] if new else (wins[0] if wins and time.time() > end - 4.5 else None)
+        if pick and to_front(pick):
+            time.sleep(0.4)  # apps sometimes take the focus back right after: check, and try again if so
+            if _u32.GetForegroundWindow() == pick:
+                return
+    print(f"Couldn't bring {exe} to the front (in front: {_exe_of(_u32.GetForegroundWindow()) or 'unknown'})")
 
 
 KEY_FILE = HERE / ".deck-key"
@@ -388,7 +471,7 @@ class Deck(BaseHTTPRequestHandler):
         target = ACTIONS.get(url.path.removeprefix("/run/"))
         if target is None:
             return self._send(404, b"Unknown pad")
-        os.startfile(target)  # Windows: opens the app, URI or link like double-clicking it
+        threading.Thread(target=open_in_front, args=(target, WINDOWS.get(url.path.removeprefix("/run/"))), daemon=True).start()
         self._send(204)
 
 
