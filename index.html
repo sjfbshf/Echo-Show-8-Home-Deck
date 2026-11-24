@@ -380,23 +380,25 @@
       p.classList.toggle("can-seek", !!(timed && n.seek));
       p.classList.toggle("no-time", on && !timed && !!n.keys);  // Spotify whose length wasn't found
     });
-    document.getElementById("npTitle").textContent = on ? n.title : "Nothing playing";
-    document.getElementById("npWho").textContent = on ? (n.artist || n.album || " ") : "Play something on your PC";
-    document.getElementById("npFrom").textContent = document.getElementById("hudFrom").textContent = on ? appName(n.app) + (n.playing ? "" : " · paused") : "Your PC";
-    document.getElementById("hudTitle").textContent = on ? n.title : "";
-    document.getElementById("hudWho").textContent = on ? (n.artist || n.album || "") : "";
+    txt(document.getElementById("npTitle"), on ? n.title : "Nothing playing");
+    txt(document.getElementById("npWho"), on ? (n.artist || n.album || " ") : "Play something on your PC");
+    var from = on ? appName(n.app) + (n.playing ? "" : " · paused") : "Your PC";
+    txt(document.getElementById("npFrom"), from); txt(document.getElementById("hudFrom"), from);
+    txt(document.getElementById("hudTitle"), on ? n.title : "");
+    txt(document.getElementById("hudWho"), on ? (n.artist || n.album || "") : "");
     var at = timed ? Math.min(n.length, n.position + (n.playing ? (Date.now() - npAt) / 1000 : 0)) : 0;
     if (timed && dragAt != null) at = dragAt;  // while you drag the line it shows where you'd land
     var pct = timed ? at / n.length * 100 : 0;
     each(".np-bar", function (b) { b.style.transform = "translateX(" + (pct - 100) + "%)"; });
     each(".np-knob", function (k) { k.style.transform = "translateX(" + pct + "%)"; });
     // Spotify's times are the helper's own estimate (it can't see jumps made in Spotify), so they get a "~"
-    each(".np-at", function (t) { t.textContent = timed ? (n.estimated ? "~" : "") + mmss(at) : on && n.playing && !n.keys ? "Live" : ""; });
-    each(".np-left", function (t) { t.textContent = timed ? "-" + mmss(n.length - at) : ""; });
+    each(".np-at", function (t) { txt(t, timed ? (n.estimated ? "~" : "") + mmss(at) : on && n.playing && !n.keys ? "Live" : ""); });
+    each(".np-left", function (t) { txt(t, timed ? "-" + mmss(n.length - at) : ""); });
     // only the keys the app supports: YouTube has no next/previous outside a playlist, but lets you jump around
-    each(".k-prev", function (b) { b.hidden = !(on && n.prev); });
-    each(".k-next", function (b) { b.hidden = !(on && n.next); });
-    each(".k-back, .k-fwd", function (b) { b.hidden = !(timed && n.seek); });
+    function hide(b, h) { if (b.hidden !== h) b.hidden = h; }
+    each(".k-prev", function (b) { hide(b, !(on && n.prev)); });
+    each(".k-next", function (b) { hide(b, !(on && n.next)); });
+    each(".k-back, .k-fwd", function (b) { hide(b, !(timed && n.seek)); });
     var art = on ? n.art : 0;
     if (art !== npArt) {
       npArt = art;
@@ -515,12 +517,15 @@
   alarmJs.src = "alarm.js";
   document.body.appendChild(alarmJs);
 
+  // only touch the page when something changed: rewriting the same text still makes the browser redo layout
+  function put(el, html) { if (el.__was !== html) { el.__was = html; el.innerHTML = html; } }
+  function txt(el, t) { if (el.__was !== t) { el.__was = t; el.textContent = t; } }
   function clockText(mins) { var h = Math.floor(mins / 60), m = mins % 60; return (h % 12 || 12) + ":" + (m < 10 ? "0" : "") + m + (h < 12 ? " AM" : " PM"); }
   function tick() {
     var d = new Date(), t = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
     var ampm = (/\s?([AP]M)$/i.exec(t) || [])[1];
-    document.getElementById("time").innerHTML = t.replace(/\s?[AP]M$/i, "") + (ampm ? "<small>" + ampm + "</small>" : "");
-    document.getElementById("date").textContent = d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+    put(document.getElementById("time"), t.replace(/\s?[AP]M$/i, "") + (ampm ? "<small>" + ampm + "</small>" : ""));
+    txt(document.getElementById("date"), d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }));
     var s = d.getSeconds(), bar = document.getElementById("minute");
     bar.style.transition = s === 0 ? "none" : "";
     bar.style.transform = "translateX(" + (s / 59 * 100 - 100) + "%)";
@@ -528,7 +533,7 @@
     var A = window.Alarm && window.Alarm.S, soon = [];
     if (A && A.tEnd) { var left = Math.max(0, Math.round((A.tEnd - Date.now()) / 1000)); soon.push("Timer " + Math.floor(left / 60) + ":" + ("0" + left % 60).slice(-2)); }
     if (A && A.aOn) soon.push("Alarm " + clockText(A.aMin));
-    document.getElementById("soon").innerHTML = soon.map(function (x) { return "<span>" + x + "</span>"; }).join("");
+    put(document.getElementById("soon"), soon.map(function (x) { return "<span>" + x + "</span>"; }).join(""));
   }
   // Claude usage comes from the PC helper (usage.json there); the countdowns tick here between updates
   var USAGE = null;

@@ -48,6 +48,7 @@
   .day.out { opacity: .35; }
   .day.today .n { background: var(--accent); color: #1a1205; font-weight: 650; }
   .day.sel { border-color: rgba(242,184,75,.55); background: rgba(242,184,75,.06); }
+  .day:active { border-color: rgba(242,184,75,.4); background: rgba(242,184,75,.1); }  /* lights up as soon as your finger lands */
   .chip { font-size: 12px; line-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 6px; border-left: 3px solid var(--c); color: #cdd5e2; }
   .more { font-size: 11px; color: var(--dim); padding-left: 9px; }
 
@@ -79,7 +80,7 @@
   .sheet[hidden] { display: none; }
   .box { width: 1180px; height: 730px; display: grid; grid-template-columns: minmax(0, 1fr) 420px; grid-template-rows: 64px minmax(0, 1fr) auto; gap: 18px 30px;
          padding: 24px 30px; border-radius: 28px; border: 1px solid var(--line); background: linear-gradient(170deg, #121b28, #0b111b);
-         box-shadow: 0 40px 80px -30px #000; animation: rise .35s cubic-bezier(.2,.8,.2,1); }
+         box-shadow: 0 30px 50px -30px #000; animation: rise .25s cubic-bezier(.2,.8,.2,1); will-change: transform, opacity; }
   @keyframes rise { from { opacity: 0; transform: translateY(26px) scale(.98); } }
   .bh { grid-column: 1 / 3; display: flex; align-items: center; gap: 14px; }
   .bh h2 { font-size: 26px; font-weight: 500; margin-right: auto; }
@@ -380,6 +381,16 @@
     var keep = {}; FEEDS.forEach(function (f) { keep[slot(f.url)] = 1; });
     for (var i = localStorage.length - 1; i >= 0; i--) { var k = localStorage.key(i); if (/^deckCal/.test(k) && !keep[k]) localStorage.removeItem(k); }
   })();
+  // keeps only events from last year to two years ahead (repeating ones always stay, they can come back any year).
+  // Feeds like US holidays list decades of them, and reading them all made the page slower to open.
+  function trim(text) {
+    var y = new Date().getFullYear();
+    return text.replace(/BEGIN:VEVENT[\s\S]*?END:VEVENT\r?\n?/g, function (ev) {
+      if (/\nRRULE[:;]/.test(ev)) return ev;
+      var m = /\nDTSTART[^:]*:(\d{4})/.exec(ev);
+      return !m || (+m[1] >= y - 1 && +m[1] <= y + 2) ? ev : "";
+    });
+  }
   function rebuild() {
     EVENTS = [];
     FEEDS.forEach(function (f) { var t = localStorage.getItem(slot(f.url)); if (t) EVENTS = EVENTS.concat(parseICS(t, f.c)); });
@@ -480,7 +491,7 @@
     var left = FEEDS.length;
     FEEDS.forEach(function (f, i) {
       fetch(f.url).then(function (r) { if (!r.ok) throw r; return r.text(); })
-        .then(function (t) { if (t.indexOf("BEGIN:VCALENDAR") < 0) throw t; localStorage.setItem(slot(f.url), t); })
+        .then(function (t) { if (t.indexOf("BEGIN:VCALENDAR") < 0) throw t; localStorage.setItem(slot(f.url), trim(t)); })
         .catch(function () { failed.push(f.mine ? "your calendar" : "holidays"); })
         .then(function () { if (!--left) { if (failed.length < FEEDS.length) updated = new Date(); rebuild(); } });
     });
