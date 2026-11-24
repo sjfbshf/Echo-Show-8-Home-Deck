@@ -36,6 +36,7 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
    - `calendars`: Google Calendar *secret iCal addresses*, if you want them (see below). Up to 4 get their own colour.
    - `claude_usage`: `false` hides the Claude usage panel.
    - `now_playing`: `false` stops the PC helper reading what's playing.
+   - `spotify_client_id`: optional, see *Spotify* below.
    - `adb`: the full path to `adb.exe`, if it isn't on your PATH.
 3. **Choose your PC apps** in `pads.json`.
    - Each PC pad has an `id`, a logo (`icon`, from [Iconify](https://icon-sets.iconify.design/)), and `pc`: what to open.
@@ -93,6 +94,20 @@ The card at the bottom right shows what your PC is playing: anything that appear
 - **Some Spotify installs don't share what they play with Windows.** The card then reads the song from Spotify's window title instead, and looks up the album cover and song length with Deezer's or Apple's free music search. It only uses them when the song name matches exactly, so some songs show none. The position is the helper's own estimate (shown with a "~"), since it can't see jumps you make in Spotify.
 - **How it works:** `nowplaying.ps1` reads Windows' media controls about once a second. The PC helper starts it, and it needs nothing installed.
 
+### Spotify (optional)
+
+Without this, a Spotify that doesn't share with Windows gets an estimated position and can't be dragged. Connecting Spotify's official Web API gives exact times, Spotify's own cover, and dragging through songs. Dragging needs Spotify Premium.
+
+1. Go to the [Spotify developer dashboard](https://developer.spotify.com/dashboard), log in, and click **Create app**.
+   - Any name and description.
+   - **Redirect URI:** `http://127.0.0.1:8766/callback` (click **Add**).
+   - Tick **Web API**, agree to the terms, and click **Save**.
+2. In the app's **Settings**, copy the **Client ID** into `settings.json` as `"spotify_client_id"`. You don't need the client secret.
+3. Run `python spotify_login.py`. Spotify's sign-in page opens in your browser: click **Agree**.
+4. Restart the PC helper.
+
+The sign-in only keeps a renewal token, in `.spotify-token` on your PC (git-ignored). To disconnect, delete that file, or remove the app at [spotify.com/account/apps](https://www.spotify.com/account/apps/).
+
 ### "Alexa, open sesame" (Echo only, optional)
 
 On a rooted Echo Show, Alexa won't open apps. `echo-app/` is a tiny Android accessibility service that watches only Alexa's own screen. When your newest request reads "open sesame", it closes Alexa and brings Fully back to the front.
@@ -120,7 +135,7 @@ To turn it off, run `adb uninstall com.homedeck.opensesame`.
 
 ## Safety notes
 
-- Never upload or share `settings.json`, `.deck-key` or `deck.log`. They're already in `.gitignore`.
+- Never upload or share `settings.json`, `.deck-key`, `.spotify-token` or `deck.log`. They're already in `.gitignore`.
 - Anyone on your Wi-Fi who learns the key could open the listed apps, see what's playing and control it, but nothing else.
 - The screen talks to the PC over plain HTTP on your home network, so only use it on a Wi-Fi you trust, and allow the helper on **private** networks only.
 - The key is also saved on the screen (in `config.js`, in Fully's folder).

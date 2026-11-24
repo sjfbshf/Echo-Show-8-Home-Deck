@@ -1,6 +1,7 @@
 # your own settings and secrets: never upload these
 settings.json
 .deck-key
+.spotify-token
 calendar-url.txt
 
 # made while running

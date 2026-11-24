@@ -10,5 +10,6 @@
   "calendars": [],
   "claude_usage": true,
   "now_playing": true,
+  "spotify_client_id": "",
   "adb": ""
 }

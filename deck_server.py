@@ -191,6 +191,98 @@ def spotify_position(key, playing):
     return CLOCK["played"] + (now - CLOCK["since"] if CLOCK["since"] is not None else 0)
 
 
+# Spotify's official Web API (optional; set up with spotify_login.py). When connected, a Spotify song gets its
+# exact position, length and cover from Spotify itself, and the deck can jump in it (that needs Premium).
+# Only a renewal token is kept, in .spotify-token; nothing is stored in settings.json but the app's public Client ID.
+SP_ID = (SETTINGS.get("spotify_client_id") or "").strip()
+SP_TOKEN_FILE = HERE / ".spotify-token"
+SP = {"access": None, "until": 0.0, "state": None, "at": 0.0, "seek_ok": True, "art": {}}
+
+
+def sp_access():
+    if SP["access"] and time.time() < SP["until"] - 60:
+        return SP["access"]
+    refresh = json.loads(SP_TOKEN_FILE.read_text(encoding="utf-8"))["refresh_token"]
+    req = urllib.request.Request("https://accounts.spotify.com/api/token", data=urlencode({
+        "grant_type": "refresh_token", "refresh_token": refresh, "client_id": SP_ID}).encode(),
+        headers={"Content-Type": "application/x-www-form-urlencoded"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        t = json.load(r)
+    if t.get("refresh_token"):  # Spotify may hand out a new renewal token; keep the newest
+        SP_TOKEN_FILE.write_text(json.dumps({"refresh_token": t["refresh_token"]}), encoding="utf-8")
+    SP["access"], SP["until"] = t["access_token"], time.time() + t.get("expires_in", 3600)
+    return SP["access"]
+
+
+def sp_call(method, path, query=None):
+    url = "https://api.spotify.com/v1" + path + ("?" + urlencode(query) if query else "")
+    req = urllib.request.Request(url, method=method, data=b"" if method != "GET" else None,
+                                 headers={"Authorization": "Bearer " + sp_access()})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        body = r.read()
+    try:
+        return json.loads(body) if body else None
+    except ValueError:  # playback commands answer with a bare id or nothing, not JSON
+        return None
+
+
+def sp_cover(url):
+    """A number for Spotify's cover picture (fetched once), for /art?v=."""
+    if url not in SP["art"]:
+        with urllib.request.urlopen(url, timeout=10) as r:
+            img = r.read()
+        no = next(COVER_NO)
+        COVER_IMG[no] = img
+        SP["art"][url] = no
+    return SP["art"][url]
+
+
+def spotify_loop():
+    """While Spotify is the one playing, ask it every 1.5 s what it's doing."""
+    while True:
+        if NOW.get("keys"):
+            try:
+                SP["state"], SP["at"] = sp_call("GET", "/me/player"), time.time()
+            except Exception as e:
+                SP["state"] = None
+                print(f"Spotify not reached: {type(e).__name__} {getattr(e, 'code', '')}")
+                time.sleep(10)
+        time.sleep(1.5)
+
+
+def from_spotify(now):
+    """Fill a window-title Spotify reading with Spotify's own exact details, when connected."""
+    st = SP["state"]
+    if not st or time.time() - SP["at"] > 5 or not st.get("item"):
+        return False
+    item = st["item"]
+    # only if it's the same song the window shows (it could be playing on your phone, say)
+    if plain(item.get("name", "")) != plain(now.get("title", "")):
+        return False
+    pos = (st.get("progress_ms") or 0) / 1000 + ((time.time() - SP["at"]) if st.get("is_playing") else 0)
+    images = item.get("album", {}).get("images") or []
+    try:
+        art = sp_cover(images[0]["url"]) if images else 0
+    except Exception:
+        art = 0
+    seekable = SP["seek_ok"] and not st.get("actions", {}).get("disallows", {}).get("seeking")
+    now.update(position=round(pos, 1), length=round(item.get("duration_ms", 0) / 1000, 1), art=art or now.get("art", 0),
+               seek=bool(seekable), estimated=False, via="spotify")
+    return True
+
+
+def sp_seek(seconds):
+    try:
+        sp_call("PUT", "/me/player/seek", {"position_ms": int(seconds * 1000)})
+        SP["at"] = 0  # ask again soon, so the card shows the new spot
+    except Exception as e:
+        if getattr(e, "code", 0) == 403:  # Spotify allows jumping only with Premium
+            SP["seek_ok"] = False
+            print("Spotify said no to jumping (it needs Premium)")
+        else:
+            print(f"Spotify jump failed: {type(e).__name__} {getattr(e, 'code', '')}")
+
+
 def now_playing_loop():
     global NOW, NP_PROC
     while True:
@@ -208,6 +300,7 @@ def now_playing_loop():
                     if info["len"]:
                         pos %= info["len"]  # on repeat, the same song starts over
                     now.update(art=info["no"], length=round(info["len"], 1), position=round(pos, 1), estimated=True)
+                    from_spotify(now)  # exact details straight from Spotify, when connected
                 else:
                     spotify_position(None, False)  # Spotify paused or gone: stop its clock
                 NOW = now  # swapped whole, so a request never sees half of it
@@ -273,6 +366,13 @@ class Deck(BaseHTTPRequestHandler):
             return self._send(204)
         if url.path in ("/np/next", "/np/prev", "/np/seek"):  # skip or jump in what's playing
             cmd = url.path.removeprefix("/np/")
+            if cmd == "seek" and NOW.get("via") == "spotify":  # Spotify connected: it jumps itself
+                try:
+                    to = max(0.0, float(parse_qs(url.query).get("to", [""])[0]))
+                except ValueError:
+                    return self._send(400, b"Bad time")
+                threading.Thread(target=sp_seek, args=(to,), daemon=True).start()
+                return self._send(204)
             if cmd == "seek":
                 try:
                     cmd = f"seek {max(0.0, float(parse_qs(url.query).get('to', [''])[0])):.1f}"
@@ -317,4 +417,6 @@ if __name__ == "__main__":
         threading.Thread(target=usage_loop, daemon=True).start()
     if SETTINGS.get("now_playing", True):
         threading.Thread(target=now_playing_loop, daemon=True).start()
+        if SP_ID and SP_TOKEN_FILE.exists():
+            threading.Thread(target=spotify_loop, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Deck).serve_forever()
