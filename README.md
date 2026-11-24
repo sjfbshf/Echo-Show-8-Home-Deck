@@ -4,15 +4,15 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
 
 ![The deck](docs/deck.png)
 
-- **Top left: apps on the screen itself.** Weather, a timer and alarm, your calendar, and Google. These work even when your PC is off.
+- **Top left: apps on the screen itself.** Weather, a timer and alarm (flick-to-pick time wheels), your calendar, and Google. These work even when your PC is off.
 - **Top right: apps on your PC.** One tap opens Claude, ChatGPT, Terminal, Obsidian, or anything else you list.
 - **Middle: Claude usage.** Your 5-hour and weekly Claude plan usage, and when each one resets. This is optional.
 - **Bottom: a clock and PC media keys.** Play/pause, next and previous, and volume.
 - **"Alexa, open sesame"** brings the deck back from the Alexa screen (Echo only, optional).
 
-| Weather | Calendar |
-|---|---|
-| ![Weather](docs/weather.png) | ![Calendar](docs/calendar.png) |
+| Weather | Calendar | Timer & alarm |
+|---|---|---|
+| ![Weather](docs/weather.png) | ![Calendar](docs/calendar.png) | ![Timer](docs/timer.png) |
 
 ## What you need
 
@@ -35,12 +35,13 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
 3. **Choose your PC apps** in `pads.json`.
    - Each PC pad has an `id`, a logo (`icon`, from [Iconify](https://icon-sets.iconify.design/)), and `pc`: what to open.
    - `pc` can be a program's path, a link, or a Store app as `shell:AppsFolder\…`. To find a Store app's name, run `Get-StartApps` in PowerShell.
+   - App IDs can differ between installs, so check the sample ones. For example, the ChatGPT app on my PC is listed as `OpenAI.Codex_…`.
 4. **Start the PC helper:** `python deck_server.py`.
    - When Windows Firewall asks, allow Python on **private** networks.
    - To start it hidden at every login, make a shortcut in `shell:startup` to `pythonw.exe "C:\path\to\deck_server.py"`. Its output then goes to `deck.log`.
 5. **Copy the deck to the screen:** plug it in by USB and run `python sync_echo.py`.
    - This copies the pages, makes Fully open the deck on start, and gives Fully permission to read them.
-   - Setting Fully's start page needs root. On a normal tablet, set Fully's *Start URL* to `file:///sdcard/Android/data/de.ozerov.fully/files/home-deck/index.html` yourself.
+   - Setting Fully's start page needs root. On a normal tablet the script skips that step and tells you to set Fully's *Start URL* to `file:///sdcard/Android/data/de.ozerov.fully/files/home-deck/index.html` yourself, once.
 
 Run `sync_echo.py` again whenever you edit a page, `pads.json` or `settings.json`, or when your PC's IP address changes.
 
@@ -67,9 +68,11 @@ On a rooted Echo Show, Alexa won't open apps. `echo-app/` is a tiny Android acce
 ```sh
 sh echo-app/build.sh            # needs Google's build-tools 36 + android-28 platform, a JDK and Python; see the top of build.sh
 adb install -r echo-app/out/open-sesame.apk
-adb shell settings put secure enabled_accessibility_services com.homedeck.opensesame/.OpenSesame
-adb shell settings put secure accessibility_enabled 1
+# adds Open Sesame to the list, keeping any accessibility service you already use (like a screen reader)
+adb shell 'cur=$(settings get secure enabled_accessibility_services); case "$cur" in null|"") new=com.homedeck.opensesame/.OpenSesame ;; *opensesame*) new=$cur ;; *) new="$cur:com.homedeck.opensesame/.OpenSesame" ;; esac; settings put secure enabled_accessibility_services "$new"; settings put secure accessibility_enabled 1'
 ```
+
+On a tablet with an Accessibility menu, you can instead switch on **Open Sesame (home deck)** there.
 
 To turn it off, run `adb uninstall com.homedeck.opensesame`.
 

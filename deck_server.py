@@ -47,9 +47,11 @@ def press(vk):
 
 
 KEY_FILE = HERE / ".deck-key"
-if not KEY_FILE.exists():
-    KEY_FILE.write_text(secrets.token_urlsafe(12))
+if not KEY_FILE.exists() or len(KEY_FILE.read_text().strip()) < 16:
+    # a missing, empty or too-short key would let anyone in, so make a fresh one (then run sync_echo.py again)
+    KEY_FILE.write_text(secrets.token_urlsafe(18))
 KEY = KEY_FILE.read_text().strip()
+assert len(KEY) >= 16, "the deck key in .deck-key is too short"
 
 
 # Claude usage for the deck: every 5 minutes, ask Anthropic for this account's plan usage using the
@@ -95,7 +97,8 @@ def usage_loop():
 
 class Deck(BaseHTTPRequestHandler):
     def _authorized(self, query):
-        return secrets.compare_digest(query.get("k", [""])[0], KEY)
+        given = query.get("k", [""])[0]
+        return bool(given) and secrets.compare_digest(given, KEY)  # a missing or empty key never matches
 
     # keep the key out of deck.log
     def log_request(self, code="-", size="-"):

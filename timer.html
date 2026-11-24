@@ -6,80 +6,129 @@
 <title>Timer and alarm</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;500;650&display=swap" rel="stylesheet">
 <style>
-  /* Timer and alarm on the Echo. Type the time on the keypad (like a microwave), or tap a quick-start button.
+  /* Timer and alarm on the Echo. Flick the wheels to pick a time, or tap a quick start.
      The state lives in alarm.js, so both keep running and ringing on the deck. */
-  :root { --bg:#070b12; --card:#0e1520; --line:rgba(160,190,230,.12); --text:#eef2f8; --dim:#7f8aa0; --accent:#f2b84b; --bad:#ff6b6b; }
+  :root { --bg:#070b12; --card:#0e1520; --line:rgba(160,190,230,.12); --text:#eef2f8; --dim:#7f8aa0; --faint:#4c566a;
+          --accent:#f2b84b; --bad:#ff6b6b; --row:76px; }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
   body {
-    background: radial-gradient(ellipse at 50% 50%, #0d1524 0%, var(--bg) 70%);
+    background: radial-gradient(ellipse at 50% 40%, #0d1524 0%, var(--bg) 70%);
     color: var(--text); font-family: "Sora", "Segoe UI", Roboto, sans-serif;
-    display: grid; grid-template-columns: 72px minmax(0, 1fr) minmax(0, 400px); gap: 20px; padding: 26px 28px;
-    overflow: hidden; -webkit-user-select: none; user-select: none;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px); grid-template-rows: 60px minmax(0, 1fr);
+    gap: 18px; padding: 22px 26px; overflow: hidden; -webkit-user-select: none; user-select: none;
   }
   button { font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--line); background: linear-gradient(170deg,#121b28,var(--card)); border-radius: 18px; }
   button:active { transform: scale(.97); border-color: var(--accent); }
-  button:disabled { opacity: .35; }
-  .home { font-size: 34px; color: var(--dim); }
-  .panel { border: 1px solid var(--line); border-radius: 24px; background: rgba(14,21,32,.6); padding: 22px 26px; min-height: 0; }
+  .panel { border: 1px solid var(--line); border-radius: 24px; background: rgba(14,21,32,.6); padding: 20px 24px; min-height: 0; min-width: 0; }
+  .label { font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+  [hidden] { display: none !important; }
 
-  .main { display: flex; flex-direction: column; gap: 18px; }
-  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .tab { height: 86px; display: flex; align-items: center; gap: 14px; padding: 0 18px; text-align: left; font-size: 26px; font-weight: 500; }
-  .tab img { width: 48px; height: 48px; }
-  .tab small { display: block; font-size: 15px; font-weight: 300; color: var(--dim); margin-top: 2px; }
-  .tab.on { border-color: var(--accent); background: rgba(242,184,75,.1); }
-  .tab .live { color: var(--accent); }
+  /* top bar, same on every page */
+  .top { grid-column: 1 / 3; display: flex; align-items: center; gap: 18px; }
+  .home { display: flex; align-items: center; gap: 10px; height: 60px; padding: 0 22px 0 18px; font-size: 18px; }
+  .home svg { width: 26px; height: 26px; }
+  .title { font-size: 22px; font-weight: 500; }
+  .side { margin-left: auto; font-size: 15px; color: var(--dim); display: flex; gap: 18px; }
+  .side b { color: var(--accent); font-weight: 500; }
 
-  .display { flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; }
-  .seg { text-align: center; }
-  .seg b { display: block; font-size: 140px; font-weight: 300; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
-  .seg span { font-size: 15px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
-  .colon { font-size: 110px; font-weight: 300; color: var(--dim); padding-bottom: 34px; }
-  .typing .seg b { color: var(--accent); }
-  .ampm { display: flex; flex-direction: column; gap: 10px; margin-left: 18px; padding-bottom: 30px; }
-  .ampm button { width: 96px; height: 60px; font-size: 24px; }
-  .ampm button.on { border-color: var(--accent); color: var(--accent); background: rgba(242,184,75,.1); }
+  /* left: Timer / Alarm switch, then the wheels (or the countdown) */
+  .main { display: flex; flex-direction: column; gap: 14px; }
+  .tabs { display: inline-grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px; border-radius: 18px; border: 1px solid var(--line); background: rgba(7,11,18,.5); align-self: flex-start; }
+  .tab { height: 52px; padding: 0 26px; border: 0; background: none; font-size: 20px; color: var(--dim); border-radius: 13px; }
+  .tab.on { background: rgba(242,184,75,.14); color: var(--accent); }
+  .stage { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; min-height: 0; }
+
+  /* the wheels: flick up and down, the middle row is the value */
+  .wheels { display: flex; align-items: center; gap: 8px; position: relative; }
+  .band { position: absolute; left: -18px; right: -18px; top: 50%; height: var(--row); margin-top: calc(var(--row) / -2);
+          border-radius: 18px; border: 1px solid rgba(242,184,75,.35); background: rgba(242,184,75,.06); pointer-events: none; }
+  .wheel { position: relative; height: calc(var(--row) * 5); width: 132px; overflow-y: scroll; scrollbar-width: none;
+           scroll-snap-type: y mandatory; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+           -webkit-mask-image: linear-gradient(transparent, #000 32%, #000 68%, transparent); }
+  .wheel::-webkit-scrollbar { display: none; }
+  .wheel.ampm { width: 110px; }
+  .wheel div { height: var(--row); display: flex; align-items: center; justify-content: center; scroll-snap-align: center;
+               font-size: 52px; font-weight: 300; font-variant-numeric: tabular-nums; color: var(--faint); transition: color .15s, font-size .15s; }
+  .wheel.ampm div { font-size: 34px; }
+  .wheel div.near { color: var(--dim); }
+  .wheel div.mid { color: var(--text); font-size: 64px; font-weight: 500; }
+  .wheel.ampm div.mid { font-size: 38px; }
+  .unit { font-size: 14px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); width: 52px; position: relative; z-index: 1; }
+  .colon { font-size: 54px; color: var(--faint); margin: 0 4px 6px; position: relative; z-index: 1; }
+
+  /* running or paused timer: big digits and a draining line */
+  .count { text-align: center; width: 100%; }
+  .count .big { font-size: 150px; font-weight: 300; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .count .of { font-size: 18px; color: var(--dim); margin-top: 10px; }
+  .drain { height: 6px; border-radius: 3px; background: rgba(160,190,230,.1); margin: 34px auto 0; width: 78%; overflow: hidden; }
+  .drain i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), #ffd98a); transition: width .25s linear; }
+  .paused .big, .paused .drain i { opacity: .45; }
 
   .msg { text-align: center; font-size: 18px; color: var(--dim); min-height: 24px; }
+  .msg b { color: var(--text); font-weight: 500; }
   .msg.bad { color: var(--bad); }
-  .label { font-size: 13px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
-  .quick { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
-  .quick button { height: 64px; font-size: 22px; }
-  .actions { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
-  .actions button { height: 84px; font-size: 28px; font-weight: 500; }
-  .go { color: var(--accent); border-color: rgba(242,184,75,.45) !important; }
 
-  .keys { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 12px; }
-  .keys button { font-size: 46px; font-weight: 300; }
-  .keys .small { font-size: 22px; font-weight: 500; color: var(--dim); }
-  [hidden] { display: none !important; }
+  /* right: quick starts and the main buttons */
+  .side-panel { display: flex; flex-direction: column; gap: 14px; }
+  .quick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+  .quick button { height: 68px; font-size: 22px; }
+  .quick button small { font-size: 15px; color: var(--dim); margin-left: 4px; }
+  .presets { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+  .presets button { height: 68px; font-size: 21px; }
+  .grow { flex: 1; }
+  .go { height: 96px; font-size: 30px; font-weight: 500; color: #1a1205; background: var(--accent); border-color: var(--accent); }
+  .go.stop { background: linear-gradient(170deg,#121b28,var(--card)); color: var(--accent); border-color: rgba(242,184,75,.5); }
+  .reset { height: 70px; font-size: 22px; color: var(--dim); }
 </style>
 </head>
 <body>
-  <button class="home" id="home" aria-label="Back to deck">&#8962;</button>
+  <div class="top">
+    <button class="home" id="home" aria-label="Back to deck">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Deck
+    </button>
+    <div class="title">Timer &amp; alarm</div>
+    <div class="side"><span id="tState"></span><span id="aState"></span></div>
+  </div>
 
   <section class="panel main">
-    <div class="tabs">
-      <button class="tab" id="tabTimer"><img src="https://api.iconify.design/fluent-emoji-flat/hourglass-not-done.svg" alt=""><span>Timer<small id="tState">Off</small></span></button>
-      <button class="tab" id="tabAlarm"><img src="https://api.iconify.design/fluent-emoji-flat/alarm-clock.svg" alt=""><span>Alarm<small id="aState">Off</small></span></button>
+    <div class="tabs" role="tablist">
+      <button class="tab" id="tabTimer" role="tab">Timer</button>
+      <button class="tab" id="tabAlarm" role="tab">Alarm</button>
     </div>
-
-    <div class="display" id="display"></div>
+    <div class="stage">
+      <div class="wheels" id="timerWheels"><div class="band"></div>
+        <div class="wheel" id="wH"></div><div class="unit">hr</div>
+        <div class="wheel" id="wM"></div><div class="unit">min</div>
+        <div class="wheel" id="wS"></div><div class="unit">sec</div>
+      </div>
+      <div class="count" id="count" hidden>
+        <div class="big" id="big"></div>
+        <div class="of" id="of"></div>
+        <div class="drain"><i id="drain"></i></div>
+      </div>
+      <div class="wheels" id="alarmWheels" hidden><div class="band"></div>
+        <div class="wheel" id="aH"></div><div class="colon">:</div>
+        <div class="wheel" id="aM"></div>
+        <div class="wheel ampm" id="aP"></div>
+      </div>
+    </div>
     <div class="msg" id="msg"></div>
+  </section>
 
+  <section class="panel side-panel">
     <div id="quickWrap">
       <div class="label">Quick start</div>
       <div class="quick" id="quick"></div>
     </div>
-
-    <div class="actions">
-      <button class="go" id="go"></button>
-      <button id="clear"></button>
+    <div id="presetWrap" hidden>
+      <div class="label">Common times</div>
+      <div class="presets" id="presets"></div>
     </div>
+    <div class="grow"></div>
+    <button class="go" id="go"></button>
+    <button class="reset" id="reset"></button>
   </section>
-
-  <section class="panel keys" id="keys" aria-label="Keypad"></section>
 
 <script>
   document.getElementById("home").onclick = function () { location.href = "index.html"; };
@@ -88,122 +137,148 @@
   function hms(sec) { return [Math.floor(sec / 3600), Math.floor(sec % 3600 / 60), sec % 60]; }
   function clockText(min) { var h = Math.floor(min / 60), m = min % 60; return (h % 12 || 12) + ":" + two(m) + " " + (h < 12 ? "AM" : "PM"); }
   function short(sec) { var t = hms(sec); return (t[0] ? t[0] + ":" + two(t[1]) : t[1]) + ":" + two(t[2]); }
+  function words(sec) { var t = hms(sec), p = []; if (t[0]) p.push(t[0] + " hr"); if (t[1]) p.push(t[1] + " min"); if (t[2] || !p.length) p.push(t[2] + " sec"); return p.join(" "); }
+
+  // A wheel: a snapping scroll list. Flick it, or tap a number to bring it to the middle.
+  // onPick runs once it settles. set() moves it without calling onPick.
+  function Wheel(box, labels, onPick) {
+    var H = 76, rows = [], settle, busy = false, value = 0;
+    function pad() { var d = document.createElement("div"); box.appendChild(d); }
+    pad(); pad();
+    labels.forEach(function (t, i) {
+      var d = document.createElement("div"); d.textContent = t;
+      d.onclick = function () { box.scrollTo({ top: i * H, behavior: "smooth" }); };
+      box.appendChild(d); rows.push(d);
+    });
+    pad(); pad();
+    function at() { return Math.max(0, Math.min(rows.length - 1, Math.round(box.scrollTop / H))); }
+    function paint() {
+      var i = at();
+      rows.forEach(function (r, n) { r.className = n === i ? "mid" : Math.abs(n - i) === 1 ? "near" : ""; });
+    }
+    box.addEventListener("scroll", function () {
+      busy = true; paint();
+      clearTimeout(settle);
+      settle = setTimeout(function () {
+        var i = at();
+        if (Math.abs(box.scrollTop - i * H) > 1) box.scrollTo({ top: i * H, behavior: "smooth" });  // in case snapping isn't supported
+        busy = false;
+        if (i !== value) { value = i; onPick(i); }
+      }, 160);
+    }, { passive: true });
+    box.addEventListener("touchstart", function () { busy = true; }, { passive: true });
+    return {
+      set: function (i) { if (busy) return; value = i; box.scrollTop = i * H; paint(); },
+      get busy() { return busy; }
+    };
+  }
+  function range(n, f) { var a = []; for (var i = 0; i < n; i++) a.push(f ? f(i) : two(i)); return a; }
 
   function init() {
     var S = Alarm.S, save = Alarm.save;
-    var mode = "timer", buf = "", pm = S.aMin >= 720, err = "";
-    var digits = [];
+    var mode = "timer", err = "";
+    function timeLeft() { return S.tEnd ? Math.max(0, Math.ceil((S.tEnd - Date.now()) / 1000)) : S.tLeft; }
+    function running() { return !!S.tEnd; }
+    function paused() { return !S.tEnd && S.tLeft > 0 && S.tLeft < S.tSet; }
 
-    // keypad: digits fill from the right, like a microwave (type 1 3 0 = 1 min 30 sec)
-    var keys = $("keys");
-    ["1","2","3","4","5","6","7","8","9","Clear","0","⌫"].forEach(function (k) {
-      var b = document.createElement("button");
-      b.textContent = k;
-      if (k.length > 1 || k === "⌫") b.className = "small";
-      b.onclick = function () {
-        err = "";
-        if (k === "Clear") buf = "";
-        else if (k === "⌫") buf = buf.slice(0, -1);
-        else if (buf.length < (mode === "timer" ? 6 : 4)) buf = (buf + k).replace(/^0+/, "");
-        show();
-      };
-      keys.appendChild(b); digits.push(b);
-    });
+    // timer wheels: changing them sets the timer straight away (it starts when you press Start)
+    var picked = hms(S.tSet);
+    function pickTimer() { S.tSet = S.tLeft = picked[0] * 3600 + picked[1] * 60 + picked[2]; err = ""; save(); show(); }
+    var wH = Wheel($("wH"), range(24, String), function (i) { picked[0] = i; pickTimer(); });
+    var wM = Wheel($("wM"), range(60), function (i) { picked[1] = i; pickTimer(); });
+    var wS = Wheel($("wS"), range(60), function (i) { picked[2] = i; pickTimer(); });
 
-    // quick-start timers: one tap sets and starts
-    [[60, "1 min"], [300, "5 min"], [600, "10 min"], [900, "15 min"], [1800, "30 min"], [3600, "1 hr"]].forEach(function (q) {
+    // alarm wheels: changing them moves the alarm time (and keeps it on if it was on)
+    function pickAlarm(h12, m, pm) { S.aMin = (h12 % 12 + (pm ? 12 : 0)) * 60 + m; S.aFired = ""; err = ""; save(); show(); }
+    function aParts() { var h = Math.floor(S.aMin / 60); return [(h % 12 || 12) - 1, S.aMin % 60, h >= 12 ? 1 : 0]; }
+    var aH = Wheel($("aH"), range(12, function (i) { return String(i + 1); }), function (i) { var p = aParts(); pickAlarm(i + 1, p[1], p[2]); });
+    var aM = Wheel($("aM"), range(60), function (i) { var p = aParts(); pickAlarm(p[0] + 1, i, p[2]); });
+    var aP = Wheel($("aP"), ["AM", "PM"], function (i) { var p = aParts(); pickAlarm(p[0] + 1, p[1], i === 1); });
+
+    // quick start: one tap sets and starts
+    [[60, "1", "min"], [180, "3", "min"], [300, "5", "min"], [600, "10", "min"], [900, "15", "min"], [1800, "30", "min"], [2700, "45", "min"], [3600, "1", "hr"]].forEach(function (q) {
       var b = document.createElement("button");
-      b.textContent = q[1];
-      b.onclick = function () { buf = ""; S.tSet = S.tLeft = q[0]; S.tEnd = Date.now() + q[0] * 1000; save(); show(); };
+      b.innerHTML = q[1] + "<small>" + q[2] + "</small>";
+      b.onclick = function () { S.tSet = S.tLeft = q[0]; S.tEnd = Date.now() + q[0] * 1000; err = ""; save(); show(); };
       $("quick").appendChild(b);
     });
+    // common alarm times: one tap sets and turns on
+    [[360, "6:00 AM"], [390, "6:30 AM"], [420, "7:00 AM"], [450, "7:30 AM"], [480, "8:00 AM"], [540, "9:00 AM"]].forEach(function (q) {
+      var b = document.createElement("button");
+      b.textContent = q[1];
+      b.onclick = function () { S.aMin = q[0]; S.aOn = true; S.aFired = ""; err = ""; save(); show(true); };
+      $("presets").appendChild(b);
+    });
 
-    $("tabTimer").onclick = function () { mode = "timer"; buf = ""; err = ""; show(); };
-    $("tabAlarm").onclick = function () { mode = "alarm"; buf = ""; err = ""; pm = S.aMin >= 720; show(); };
-
-    function timeLeft() { return S.tEnd ? Math.max(0, Math.ceil((S.tEnd - Date.now()) / 1000)) : S.tLeft; }
-    function typedSeconds() { var p = ("000000" + buf).slice(-6); return +p.slice(0, 2) * 3600 + +p.slice(2, 4) * 60 + +p.slice(4); }
-    function typedAlarm() {  // returns minutes since midnight, or null if not a real time
-      var p = ("0000" + buf).slice(-4), h = +p.slice(0, 2), m = +p.slice(2);
-      if (h < 1 || h > 12 || m > 59) return null;
-      return (h % 12 + (pm ? 12 : 0)) * 60 + m;
-    }
+    $("tabTimer").onclick = function () { mode = "timer"; err = ""; show(true); };
+    $("tabAlarm").onclick = function () { mode = "alarm"; err = ""; show(true); };
 
     $("go").onclick = function () {
       if (mode === "timer") {
-        if (S.tEnd) { S.tLeft = timeLeft(); S.tEnd = 0; }            // pause
-        else {
-          if (buf) { S.tSet = S.tLeft = typedSeconds(); buf = ""; }   // start what was typed
-          if (S.tLeft > 0) S.tEnd = Date.now() + S.tLeft * 1000; else err = "Type a time first";
-        }
-      } else {
-        if (S.aOn && !buf) S.aOn = false;                             // cancel
-        else {
-          var t = buf ? typedAlarm() : S.aMin;
-          if (t == null) err = "That isn't a real time. Try again.";
-          else { S.aMin = t; S.aOn = true; S.aFired = ""; buf = ""; }
-        }
-      }
-      save(); show();
+        if (running()) { S.tLeft = timeLeft(); S.tEnd = 0; }                  // pause
+        else if (S.tLeft > 0) S.tEnd = Date.now() + S.tLeft * 1000;            // start or resume
+        else err = "Pick a time on the wheels first";
+      } else { S.aOn = !S.aOn; S.aFired = ""; }
+      save(); show(true);
     };
-    $("clear").onclick = function () {
-      err = ""; buf = "";
-      if (mode === "timer") { S.tEnd = 0; S.tSet = S.tLeft = 0; } else S.aOn = false;  // Reset clears the timer to 00:00:00
-      save(); show();
+    $("reset").onclick = function () {
+      err = "";
+      if (mode === "timer") { S.tEnd = 0; S.tSet = S.tLeft = 0; } else S.aOn = false;  // Reset clears the timer to 0
+      save(); show(true);
     };
 
-    function setHalf(isPm) {
-      pm = isPm;
-      if (!buf) { S.aMin = S.aMin % 720 + (pm ? 720 : 0); save(); }  // nothing typed: move the current alarm time
-      show();
+    function until(min) {  // how long until the alarm rings
+      var d = new Date(), now = d.getHours() * 60 + d.getMinutes(), m = (min - now + 1440) % 1440 || 1440;
+      return (m >= 60 ? Math.floor(m / 60) + " hr " : "") + (m % 60 ? m % 60 + " min" : "");
     }
-    function seg(v, label) { return '<div class="seg"><b>' + v + "</b><span>" + label + "</span></div>"; }
-    var colon = '<div class="colon">:</div>';
-
-    function tabs() {  // the small status under each tab; cheap, so it updates every tick
-      var running = !!S.tEnd, left = timeLeft();
+    function status() {  // the small status in the top bar
+      $("tState").innerHTML = running() ? "Timer <b>" + short(timeLeft()) + "</b>" : paused() ? "Timer paused · " + short(S.tLeft) : "";
+      $("aState").innerHTML = S.aOn ? "Alarm <b>" + clockText(S.aMin) + "</b>" : "";
+    }
+    function show(moveWheels) {
+      status();
       $("tabTimer").classList.toggle("on", mode === "timer");
       $("tabAlarm").classList.toggle("on", mode === "alarm");
-      $("tState").innerHTML = running ? '<span class="live">Running · ' + short(left) + " left</span>" : (S.tLeft > 0 && S.tLeft < S.tSet ? "Paused · " + short(S.tLeft) : "Off");
-      $("aState").innerHTML = S.aOn ? '<span class="live">On · ' + clockText(S.aMin) + "</span>" : "Off";
-    }
-    function show() {
-      var running = !!S.tEnd, left = timeLeft();
-      tabs();
       $("quickWrap").hidden = mode !== "timer";
-      var d = $("display"); d.classList.toggle("typing", !!buf);
+      $("presetWrap").hidden = mode !== "alarm";
+      var counting = mode === "timer" && (running() || paused());
+      $("timerWheels").hidden = mode !== "timer" || counting;
+      $("count").hidden = !counting;
+      $("alarmWheels").hidden = mode !== "alarm";
 
       if (mode === "timer") {
-        var t = buf ? ("000000" + buf).slice(-6).match(/../g) : hms(left).map(two);
-        d.innerHTML = seg(t[0], "hours") + colon + seg(t[1], "minutes") + colon + seg(t[2], "seconds");
-        $("go").textContent = running ? "Pause" : (S.tLeft > 0 && S.tLeft < S.tSet && !buf ? "Resume" : "Start");
-        $("clear").textContent = "Reset";
-        $("msg").textContent = err || (running ? "Keeps running on the deck" : "Type a time on the keypad, or tap a quick start");
-        digits.forEach(function (b) { b.disabled = running; });
+        var left = timeLeft();
+        if (counting) {
+          $("big").textContent = short(left);
+          $("of").textContent = (running() ? "of " : "Paused · of ") + words(S.tSet);
+          $("drain").style.width = (S.tSet ? left / S.tSet * 100 : 0) + "%";
+          $("count").classList.toggle("paused", !running());
+        } else if (moveWheels) {
+          picked = hms(S.tSet); wH.set(picked[0]); wM.set(picked[1]); wS.set(picked[2]);
+        }
+        $("go").textContent = running() ? "Pause" : paused() ? "Resume" : "Start";
+        $("go").classList.toggle("stop", running());
+        $("reset").textContent = "Reset"; $("reset").hidden = false;
+        $("msg").innerHTML = err || (running() ? "Keeps running on the deck" : paused() ? "Paused" : S.tSet ? "Timer for <b>" + words(S.tSet) + "</b>" : "Flick the wheels, or tap a quick start");
       } else {
-        var p = buf ? ("0000" + buf).slice(-4) : null;
-        var h = p ? p.slice(0, 2) : two(Math.floor(S.aMin / 60) % 12 || 12), m = p ? p.slice(2) : two(S.aMin % 60);
-        if (!buf) pm = S.aMin >= 720;
-        d.innerHTML = seg(h, "hour") + colon + seg(m, "minute") +
-          '<div class="ampm"><button id="am" class="' + (pm ? "" : "on") + '">AM</button><button id="pm" class="' + (pm ? "on" : "") + '">PM</button></div>';
-        $("am").onclick = function () { setHalf(false); };
-        $("pm").onclick = function () { setHalf(true); };
-        $("go").textContent = S.aOn && !buf ? "Cancel alarm" : "Set alarm";
-        $("clear").textContent = "Clear";
-        $("msg").textContent = err || (S.aOn && !buf ? "Rings at " + clockText(S.aMin) + ", also on the deck" : "Type the time on the keypad, then pick AM or PM");
-        digits.forEach(function (b) { b.disabled = false; });
+        if (moveWheels) { var p = aParts(); aH.set(p[0]); aM.set(p[1]); aP.set(p[2]); }
+        $("go").textContent = S.aOn ? "Turn off" : "Turn on";
+        $("go").classList.toggle("stop", S.aOn);
+        $("reset").hidden = true;
+        $("msg").innerHTML = err || (S.aOn ? "Rings at <b>" + clockText(S.aMin) + "</b> · in " + until(S.aMin) + ", also on the deck"
+          : "Off · set for <b>" + clockText(S.aMin) + "</b>. Tap Turn on");
       }
       $("msg").className = "msg" + (err ? " bad" : "");
     }
-    // redraw while the timer counts down, or when alarm.js changed something (a timer finished, an alarm rang);
-    // otherwise leave the screen alone so taps aren't lost to a redraw
-    var last = "";
+    // redraw while the timer counts down, or when alarm.js changed something (a timer finished, an alarm rang)
+    var last = JSON.stringify(S);
     window.onAlarmTick = function () {
-      var now = JSON.stringify(S);
-      if ((S.tEnd && mode === "timer") || now !== last) show(); else tabs();
+      var now = JSON.stringify(S), changed = now !== last;
       last = now;
+      if (changed || running()) show(changed && !wH.busy && !wM.busy && !wS.busy && !aH.busy && !aM.busy && !aP.busy);
+      else status();
     };
-    show();
+    show(true);
   }
 
   var js = document.createElement("script");

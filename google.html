@@ -4,22 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Google</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;500;650&display=swap" rel="stylesheet">
 <style>
   /* Google inside our own page, so the home button stays on screen.
      igu=1 is Google's embeddable mode; Fully's own toolbar would need a PLUS license.
      Sites opened from the results that refuse to be framed show an error here: tap home and try again. */
   html, body { height: 100%; margin: 0; background: #070b12; }
-  body { display: flex; overflow: hidden; }
-  .home {
-    flex: none; width: 60px; border: 0; border-right: 1px solid rgba(160,190,230,.12);
-    background: linear-gradient(170deg, #121b28, #0e1520); color: #f2b84b; font-size: 30px; cursor: pointer;
-  }
-  .home:active { background: #1a2638; }
+  body { display: flex; flex-direction: column; overflow: hidden; font-family: "Sora", "Segoe UI", Roboto, sans-serif; color: #eef2f8; }
+  /* a slim version of the top bar the other pages have, so Google keeps most of the screen */
+  .bar { flex: none; height: 56px; display: flex; align-items: center; gap: 14px; padding: 0 14px; border-bottom: 1px solid rgba(160,190,230,.12); }
+  .home { display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px 0 12px; font: inherit; font-size: 16px; color: inherit; cursor: pointer;
+          border: 1px solid rgba(160,190,230,.14); background: linear-gradient(170deg, #121b28, #0e1520); border-radius: 13px; }
+  .home svg { width: 20px; height: 20px; }
+  .home:active { border-color: #f2b84b; }
+  .title { font-size: 17px; font-weight: 500; }
+  .side { margin-left: auto; font-size: 13px; color: #7f8aa0; }
   iframe { flex: 1; border: 0; background: #fff; }
 </style>
 </head>
 <body>
-  <button class="home" aria-label="Back to deck" onclick="location.href='index.html'">&#8962;</button>
+  <div class="bar">
+    <button class="home" id="home" aria-label="Back to deck" onclick="location.href='index.html'">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Deck
+    </button>
+    <div class="title">Google</div>
+    <div class="side">Some sites won't open in here. Tap Deck to come back.</div>
+  </div>
   <iframe src="https://www.google.com/webhp?igu=1" title="Google"></iframe>
   <script src="alarm.js"></script>  <!-- timers and alarms still ring here -->
 </body>

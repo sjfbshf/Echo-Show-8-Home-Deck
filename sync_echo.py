@@ -45,19 +45,28 @@ def main():
         for f in [HERE / p for p in PAGES] + [tmp / "config.js", tmp / "pads.js"]:
             adb("push", str(f), f"{ECHO_DIR}/{f.name}")
 
-    # point Fully at the copy on the Echo (edits its settings file while it's stopped)
+    # point Fully at the copy on the screen by editing its settings file while it's stopped.
+    # That needs root (an unlocked Echo has it). On a normal tablet it's skipped and you set the Start URL once in Fully.
     adb("shell", "am force-stop de.ozerov.fully")
-    prefs = adb("shell", f"cat {PREFS}")
-    if START_URL not in prefs:
-        prefs = re.sub(r'<string name="startURL">.*?</string>', f'<string name="startURL">{START_URL}</string>', prefs)
-        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-8", newline="\n") as t:
-            t.write(prefs.replace("\r\n", "\n"))
-        adb("push", t.name, "/data/local/tmp/fully.xml")
-        adb("shell", f"cat /data/local/tmp/fully.xml > {PREFS} && rm /data/local/tmp/fully.xml")  # cat keeps the file's owner
-        Path(t.name).unlink()
+    try:
+        prefs = adb("shell", f"cat {PREFS}")
+        if "<map" not in prefs:  # some adb versions print "Permission denied" but still exit 0
+            raise subprocess.CalledProcessError(1, "cat")
+        if START_URL not in prefs:
+            prefs = re.sub(r'<string name="startURL">.*?</string>', f'<string name="startURL">{START_URL}</string>', prefs)
+            with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-8", newline="\n") as t:
+                t.write(prefs.replace("\r\n", "\n"))
+            adb("push", t.name, "/data/local/tmp/fully.xml")
+            adb("shell", f"cat /data/local/tmp/fully.xml > {PREFS} && rm /data/local/tmp/fully.xml")  # cat keeps the file's owner
+            Path(t.name).unlink()
+    except subprocess.CalledProcessError:
+        print(f"No root, so Fully's start page wasn't changed. In Fully, set Settings > Web Content > Start URL to:\n  {START_URL}")
     # Fully asks for this once its start page is a file; granting it here skips the dialog
-    adb("shell", "pm grant de.ozerov.fully android.permission.READ_EXTERNAL_STORAGE")
-    adb("shell", "am start -n de.ozerov.fully/.MainActivity")
+    try:
+        adb("shell", "pm grant de.ozerov.fully android.permission.READ_EXTERNAL_STORAGE")
+    except subprocess.CalledProcessError:
+        print("Couldn't grant Fully storage access. Allow it when Fully asks.")
+    adb("shell", "am start -n de.ozerov.fully/.MainActivity")  # always bring Fully back
     print(f"Synced {len(PAGES) + 2} files to the Echo ({len(cals)} calendar link(s)). The deck now opens from the Echo itself.")
 
 

@@ -16,12 +16,18 @@
   body {
     background: radial-gradient(ellipse at 50% 50%, #0d1524 0%, var(--bg) 70%);
     color: var(--text); font-family: "Sora", "Segoe UI", Roboto, sans-serif;
-    display: grid; grid-template-columns: 72px minmax(0, 1fr) minmax(0, 380px);
-    gap: 20px; padding: 26px 28px; overflow: hidden; -webkit-user-select: none; user-select: none;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px); grid-template-rows: 60px minmax(0, 1fr);
+    gap: 18px; padding: 22px 26px; overflow: hidden; -webkit-user-select: none; user-select: none;
   }
   button { font: inherit; color: inherit; cursor: pointer; }
-  .home { font-size: 34px; color: var(--dim); border: 1px solid var(--line); background: linear-gradient(170deg,#121b28,var(--card)); border-radius: 18px; }
+  /* top bar, same on every page */
+  .bar { grid-column: 1 / 3; display: flex; align-items: center; gap: 18px; }
+  .home { display: flex; align-items: center; gap: 10px; height: 60px; padding: 0 22px 0 18px; font-size: 18px; color: var(--text);
+          border: 1px solid var(--line); background: linear-gradient(170deg,#121b28,var(--card)); border-radius: 18px; }
+  .home svg { width: 26px; height: 26px; }
   .home:active { border-color: var(--accent); }
+  .title { font-size: 22px; font-weight: 500; }
+  .side { margin-left: auto; font-size: 15px; color: var(--dim); }
   .panel { border: 1px solid var(--line); border-radius: 24px; background: rgba(14,21,32,.6); padding: 22px 24px; min-height: 0; display: flex; flex-direction: column; }
   .label { font-size: 13px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
 
@@ -59,7 +65,13 @@
 </style>
 </head>
 <body>
-  <button class="home" aria-label="Back to deck" onclick="location.href='index.html'">&#8962;</button>
+  <div class="bar">
+    <button class="home" id="home" aria-label="Back to deck" onclick="location.href='index.html'">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Deck
+    </button>
+    <div class="title">Calendar</div>
+    <div class="side" id="side"></div>
+  </div>
 
   <section class="panel" aria-label="Month">
     <div class="top">
@@ -83,7 +95,7 @@
   var DAY = 86400000;
   var FEEDS = [{ url: "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics", c: "#5fd39a" }]
     .concat((DECK.calendars || []).map(function (u, i) { return { url: u, c: ["#6fa8ff", "#a882ff", "#ff9f6b", "#6fd3ff"][i % 4], mine: true }; }));
-  var EVENTS = [], failed = [];
+  var EVENTS = [], failed = [], updated = null;
 
   // ---------- reading iCal (.ics) ----------
   var WD = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 }, fmts = {};
@@ -105,7 +117,7 @@
     var out = [], cur = null;
     text.replace(/\r?\n[ \t]/g, "").split(/\r?\n/).forEach(function (line) {
       if (line === "BEGIN:VEVENT") cur = { ex: [], skip: {}, c: c };
-      else if (line === "END:VEVENT") { if (cur && cur.start && !isNaN(cur.start) && cur.status !== "CANCELLED") out.push(cur); cur = null; }
+      else if (line === "END:VEVENT") { if (cur && cur.start && !isNaN(cur.start)) out.push(cur); cur = null; }
       else if (cur) {
         var i = line.indexOf(":"); if (i < 0) return;
         var head = line.slice(0, i).split(";"), val = line.slice(i + 1), tz = (/;TZID="?([^;:"]+)/.exec(line.slice(0, i)) || [])[1];
@@ -121,10 +133,11 @@
         }
       }
     });
-    // a changed single occurrence of a repeating event replaces that occurrence
+    // a changed or cancelled single occurrence of a repeating event replaces that occurrence;
+    // cancelled ones are only dropped after they've taken their slot out of the series
     var byUid = {}; out.forEach(function (e) { if (e.rule) byUid[e.uid] = e; });
     out.forEach(function (e) { if (e.recId && byUid[e.uid]) byUid[e.uid].skip[e.recId] = 1; });
-    return out;
+    return out.filter(function (e) { return e.status !== "CANCELLED"; });
   }
 
   // ---------- repeating events ----------
@@ -228,6 +241,7 @@
       });
     }
     if (box.children.length <= 2 && !box.querySelector(".ev")) box.appendChild(el("div", "empty", "Nothing in the next two weeks."));
+    document.getElementById("side").textContent = updated ? "Updated " + time(updated) : "";
     var note = document.getElementById("note");
     note.className = "note" + (failed.length ? " bad" : "");
     note.textContent = failed.length ? "Couldn't update " + failed.join(" and ") + ". Showing the last copy."
@@ -236,9 +250,16 @@
   }
 
   // ---------- loading (kept in localStorage, so the last copy shows even without internet) ----------
+  // each feed's copy is stored under a fingerprint of its address, so swapping a calendar in settings.json
+  // never shows the old one's events; copies of feeds that were removed are deleted
+  function slot(url) { var h = 5381; for (var i = 0; i < url.length; i++) h = (h * 33 ^ url.charCodeAt(i)) >>> 0; return "deckCal:" + h.toString(36) + ":" + url.length; }
+  (function tidy() {
+    var keep = {}; FEEDS.forEach(function (f) { keep[slot(f.url)] = 1; });
+    for (var i = localStorage.length - 1; i >= 0; i--) { var k = localStorage.key(i); if (/^deckCal/.test(k) && !keep[k]) localStorage.removeItem(k); }
+  })();
   function rebuild() {
     EVENTS = [];
-    FEEDS.forEach(function (f, i) { var t = localStorage.getItem("deckCal" + i); if (t) EVENTS = EVENTS.concat(parseICS(t, f.c)); });
+    FEEDS.forEach(function (f) { var t = localStorage.getItem(slot(f.url)); if (t) EVENTS = EVENTS.concat(parseICS(t, f.c)); });
     draw();
   }
   function load() {
@@ -246,9 +267,9 @@
     var left = FEEDS.length;
     FEEDS.forEach(function (f, i) {
       fetch(f.url).then(function (r) { if (!r.ok) throw r; return r.text(); })
-        .then(function (t) { if (t.indexOf("BEGIN:VCALENDAR") < 0) throw t; localStorage.setItem("deckCal" + i, t); })
+        .then(function (t) { if (t.indexOf("BEGIN:VCALENDAR") < 0) throw t; localStorage.setItem(slot(f.url), t); })
         .catch(function () { failed.push(f.mine ? "your calendar" : "holidays"); })
-        .then(function () { if (!--left) rebuild(); });
+        .then(function () { if (!--left) { if (failed.length < FEEDS.length) updated = new Date(); rebuild(); } });
     });
   }
   document.getElementById("prev").onclick = function () { view = new Date(view.getFullYear(), view.getMonth() - 1, 1); draw(); };
