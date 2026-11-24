@@ -89,7 +89,7 @@ The card at the bottom right shows what your PC is playing: anything that appear
 - **The keys:** play/pause, and back or forward 10 seconds. You can also tap anywhere on the progress line to jump there.
 - **Next and previous track** appear only when the app supports them. YouTube in a browser doesn't, unless you're playing a playlist. Spotify does, and pressing previous after the first few seconds restarts the song.
 - **If several things play,** the card shows the one that's actually playing, not a paused video.
-- **Some Spotify installs don't share what they play with Windows.** The card then reads the song from Spotify's window title instead, and looks up the album cover in Apple's free iTunes search. It shows no progress line for these.
+- **Some Spotify installs don't share what they play with Windows.** The card then reads the song from Spotify's window title instead, and looks up the album cover with Deezer's or Apple's free music search. It only uses a cover when the song name matches exactly, so some songs show none. It shows no progress line for these.
 - **How it works:** `nowplaying.ps1` reads Windows' media controls about once a second. The PC helper starts it, and it needs nothing installed.
 
 ### "Alexa, open sesame" (Echo only, optional)
@@ -124,7 +124,7 @@ To turn it off, run `adb uninstall com.homedeck.opensesame`.
 - The screen talks to the PC over plain HTTP on your home network, so only use it on a Wi-Fi you trust, and allow the helper on **private** networks only.
 - The key is also saved on the screen (in `config.js`, in Fully's folder).
 - The pages load fonts from Google Fonts and logos from Iconify, so those services see your IP address when a page opens.
-- For Spotify songs read from the window title, the PC helper sends the artist and song name to Apple's iTunes search to find the cover.
+- For Spotify songs read from the window title, the PC helper sends the artist and song name to Deezer's and Apple's music search to find the cover.
 - This project isn't made by or connected to Amazon, Anthropic, Google or Fully Kiosk. Logos are loaded from Iconify, and they belong to their owners.
 
 ## License

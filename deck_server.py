@@ -18,6 +18,7 @@ import socket
 import subprocess
 import sys
 import threading
+import unicodedata
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -102,37 +103,69 @@ NP_PROC = None  # the running nowplaying.ps1; the deck's skip keys and progress 
 ART = HERE / "nowplaying-art.bin"
 
 
-# Covers for songs Windows gives no picture for (Spotify read from its window title), found with Apple's free
-# iTunes search. Only the artist and song name are sent. Kept in memory: {"artist|song": (number, image or None)}.
-COVERS = {}
+# Covers for songs Windows gives no picture for (Spotify read from its window title), found with Deezer's or
+# Apple's free search. Only the artist and song name are sent.
+# COVERS: {"artist|song": (cover number or 0, when last tried)}; COVER_IMG: {cover number: image}.
+# The deck asks /art?v=<number>, so it always gets the picture that belongs to the song it shows.
+COVERS, COVER_IMG = {}, {}
 COVER_NO = iter(range(1000, 10**9))  # cover numbers from 1000 never clash with nowplaying.ps1's
 
 
 def find_cover(artist, title):
-    """The cover's number for the deck (0 = none yet). The search runs in the background, once per song."""
+    """The cover's number for the deck (0 = none yet). Searched in the background; a miss is tried again after 5 minutes."""
     key = f"{artist}|{title}"
-    if key not in COVERS:
-        COVERS[key] = (0, None)
+    no, tried = COVERS.get(key, (0, 0))
+    if not no and time.time() - tried > 300:
+        COVERS[key] = (0, time.time())
         threading.Thread(target=fetch_cover, args=(key, artist, title), daemon=True).start()
-    return COVERS[key][0]
+    return no
+
+
+def plain(text):
+    """For comparing names: no accents, case, punctuation, "(feat. ...)" or " - Remastered" style extras."""
+    text = unicodedata.normalize("NFKD", text.split(" - ")[0])
+    text = re.sub(r"[\(\[].*?[\)\]]", "", "".join(c for c in text if not unicodedata.combining(c)))
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def get_json(url):
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "home-deck"}), timeout=10) as r:
+        return json.load(r)
+
+
+def cover_url(artist, title):
+    """The cover of this exact song, or None. A wrong cover is worse than none, so names must match."""
+    want, who = plain(title), plain(artist.split(",")[0])
+    def same(t, a):
+        return plain(t) == want and bool(who) and (who in plain(a) or plain(a) in who)
+    term = f"{artist.split(',')[0]} {title}"
+    # Deezer first (its catalogue is close to Spotify's), then Apple's iTunes search; both free with no key
+    for x in get_json("https://api.deezer.com/search?" + urlencode({"q": term, "limit": 10})).get("data", []):
+        if same(x.get("title", ""), x.get("artist", {}).get("name", "")) and x.get("album", {}).get("cover_xl"):
+            return x["album"]["cover_xl"]
+    for x in get_json("https://itunes.apple.com/search?" + urlencode({"term": term, "entity": "song", "limit": 10})).get("results", []):
+        if same(x.get("trackName", ""), x.get("artistName", "")) and x.get("artworkUrl100"):
+            return x["artworkUrl100"].replace("100x100bb", "600x600bb")
+    return None
 
 
 def fetch_cover(key, artist, title):
     try:
-        query = urlencode({"term": f"{artist} {title}", "entity": "song", "limit": 5})
-        with urllib.request.urlopen("https://itunes.apple.com/search?" + query, timeout=10) as r:
-            results = json.load(r).get("results", [])
-        # prefer a result by the same artist (searches also find covers and tributes)
-        first = artist.split(",")[0].strip().lower()
-        pick = next((x for x in results if first and first in x.get("artistName", "").lower()), results[0] if results else None)
-        if pick and pick.get("artworkUrl100"):
-            with urllib.request.urlopen(pick["artworkUrl100"].replace("100x100bb", "600x600bb"), timeout=10) as r:
-                COVERS[key] = (next(COVER_NO), r.read())
+        url = cover_url(artist, title)
+        if url:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                img = r.read()
+            no = next(COVER_NO)
+            COVER_IMG[no] = img
+            COVERS[key] = (no, time.time())
     except Exception as e:
         print(f"No cover found: {type(e).__name__}")
-    if len(COVERS) > 200:  # forget old songs
-        for k in list(COVERS)[:100]:
-            COVERS.pop(k, None)
+    if len(COVER_IMG) > 100:  # forget old songs' pictures
+        for n in sorted(COVER_IMG)[:50]:
+            COVER_IMG.pop(n, None)
+        for k, (n, _) in list(COVERS.items()):
+            if n and n not in COVER_IMG:
+                COVERS.pop(k, None)
 
 
 def now_playing_loop():
@@ -188,10 +221,13 @@ class Deck(BaseHTTPRequestHandler):
         if url.path == "/nowplaying":
             return self._send(200, json.dumps(NOW).encode(), "application/json")
         if url.path == "/art":
-            cover = COVERS.get(f"{NOW.get('artist', '')}|{NOW.get('title', '')}") if NOW.get("keys") else None
             try:
-                img = cover[1] if cover and cover[1] else ART.read_bytes()
-            except OSError:
+                v = int(parse_qs(url.query).get("v", ["0"])[0])
+            except ValueError:
+                v = 0
+            try:
+                img = COVER_IMG[v] if v >= 1000 else ART.read_bytes()  # a looked-up cover, or the one Windows gave
+            except (KeyError, OSError):
                 return self._send(404, b"No picture")
             return self._send(200, img, "image/png" if img[:4] == b"\x89PNG" else "image/jpeg")
         self._send(404, b"Not found")
