@@ -9,19 +9,25 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
   $_.Name -eq "AsTask" -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | Select-Object -First 1
-function Wait-Op($op, [type]$type) { $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op)); $t.Wait(5000) | Out-Null; $t.Result }
+# waits at most 5 s: Windows' media info can hang, and reading .Result of an unfinished task would wait forever
+function Wait-Op($op, [type]$type) {
+  $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+  if (-not $t.Wait(5000)) { throw (New-Object System.TimeoutException) }
+  $t.Result
+}
 
 $TMgr = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
 $TProps = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media.Control, ContentType = WindowsRuntime]
 $TStream = [Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType = WindowsRuntime]
 $asStream = [System.IO.WindowsRuntimeStreamExtensions].GetMethod("AsStream", [type[]]@([Windows.Storage.Streams.IRandomAccessStream, Windows.Storage.Streams, ContentType = WindowsRuntime]))
 $mgr = Wait-Op ($TMgr::RequestAsync()) $TMgr
-$lastArt = ""; $artNo = 0
+$lastArt = ""; $artNo = 0; $stuck = 0
+$shown = $null  # the player the deck is showing; its jump/skip commands go to this one
 # (not [Console]::In: its ReadLineAsync waits for a line before returning)
 $in = New-Object System.IO.StreamReader ([Console]::OpenStandardInput()); $cmd = $in.ReadLineAsync()
 
 while ($true) {
-  $out = @{ playing = $false }
+  $out = @{ playing = $false }; $shown = $null
   try {
     # whatever is actually playing wins; Windows' own "current" player can be a paused video
     $s = @($mgr.GetSessions()) | Where-Object { [string]$_.GetPlaybackInfo().PlaybackStatus -eq "Playing" } | Select-Object -First 1
@@ -35,6 +41,7 @@ while ($true) {
     }
     if (-not $s -and -not $spot) { $s = $mgr.GetCurrentSession() }
     if ($s) {
+      $shown = $s
       $p = Wait-Op ($s.TryGetMediaPropertiesAsync()) $TProps
       $tl = $s.GetTimelineProperties()
       $info = $s.GetPlaybackInfo(); $status = [string]$info.PlaybackStatus
@@ -60,7 +67,12 @@ while ($true) {
                 # what the app lets you do: YouTube has no next/previous outside a playlist, but lets you jump in the video
                 next = $info.Controls.IsNextEnabled; prev = $info.Controls.IsPreviousEnabled; seek = $info.Controls.IsPlaybackPositionEnabled }
     }
-  } catch { $out = @{ playing = $false; error = $_.Exception.GetType().Name } }
+    $stuck = 0
+  } catch {
+    $out = @{ playing = $false; error = $_.Exception.GetType().Name }
+    # stuck three times running: quit, and deck_server.py starts a fresh reader
+    if ($_.Exception -is [System.TimeoutException] -or $_.Exception.InnerException -is [System.TimeoutException]) { if (++$stuck -ge 3) { exit 1 } }
+  }
   [Console]::Out.WriteLine(($out | ConvertTo-Json -Compress))
   [Console]::Out.Flush()
   # wait up to a second for a command; one that arrives is done straight away, then the new state is printed
@@ -68,7 +80,7 @@ while ($true) {
     $line = $cmd.Result
     if ($null -eq $line) { exit }  # deck_server.py stopped
     try {
-      $s = $mgr.GetCurrentSession()
+      $s = $shown
       if ($s -and $line -match '^seek (\d+(\.\d+)?)$') { Wait-Op ($s.TryChangePlaybackPositionAsync([long]([double]$Matches[1] * 1e7))) ([bool]) | Out-Null }
       elseif ($s -and $line -eq "next") { Wait-Op ($s.TrySkipNextAsync()) ([bool]) | Out-Null }
       elseif ($s -and $line -eq "prev") { Wait-Op ($s.TrySkipPreviousAsync()) ([bool]) | Out-Null }

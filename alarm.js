@@ -1,11 +1,13 @@
 // Timer, alarm and calendar reminders, shared by every deck page.
 // Their state lives in localStorage, so they keep counting on either page,
 // and whichever page is open rings (a full-screen overlay plus a beep; tap to stop).
-// They can't ring while the Echo shows another website (Google, Calendar...).
+// They can't ring while the Echo shows another website (like Google); they ring when a deck page opens again,
+// if it's soon enough.
 (function () {
-  var S = { tSet: 300, tLeft: 300, tEnd: 0, aMin: 420, aOn: false, aFired: "" };
+  // aAt: when the alarm next rings (ms); worked out when it's turned on, and cleared when it's off or moved
+  var S = { tSet: 300, tLeft: 300, tEnd: 0, aMin: 420, aOn: false, aAt: 0 };
   try { Object.assign(S, JSON.parse(localStorage.getItem("deckAlarm") || "{}")); } catch (e) {}
-  function save() { localStorage.setItem("deckAlarm", JSON.stringify(S)); }
+  function save() { try { localStorage.setItem("deckAlarm", JSON.stringify(S)); } catch (e) {} }  // a failed save must never stop a ring
 
   var css = document.createElement("style");
   css.textContent =
@@ -48,9 +50,13 @@
     var t = ctx.currentTime;
     tone(t, 1760); tone(t + 0.2, 1760); tone(t + 0.4, 1760);
   }
-  // what = { icon, title, sub } for a calendar reminder; nothing for the timer and alarm
+  // what = { title, sub } for a calendar reminder; nothing for the timer and alarm.
+  // Alerts that come while another is showing wait their turn; each shows after the one before is tapped.
+  // A reminder that has gone quiet (no more beeping) steps aside straight away for a new one.
+  var queue = [];
   function ring(what) {
-    if (beeping) return;
+    if (beeping === -1) stop(true);
+    if (beeping) { queue.push(what); return; }
     over = document.createElement("div");
     over.className = "ring-over";
     over.innerHTML = '<img src="https://api.iconify.design/fluent-emoji-flat/' + (what ? "spiral-calendar" : "alarm-clock") + '.svg" alt="">';
@@ -63,7 +69,10 @@
     beeping = setInterval(beep, 1000); beep();
     if (what) quiet = setTimeout(function () { clearInterval(beeping); beeping = -1; }, 120000);  // a reminder beeps for 2 minutes, then waits quietly to be tapped
   }
-  function stop() { clearInterval(beeping); clearTimeout(quiet); beeping = null; if (over) over.remove(); over = null; }
+  function stop(keepQueue) {
+    clearInterval(beeping); clearTimeout(quiet); beeping = null; if (over) over.remove(); over = null;
+    if (!keepQueue && queue.length) setTimeout(function () { if (!beeping && queue.length) ring(queue.shift()); }, 400);
+  }
   document.addEventListener("touchstart", unlock, { passive: true, capture: true });
   document.addEventListener("click", function (e) {
     unlock();
@@ -75,24 +84,23 @@
   // another website still rings if it's less than 10 minutes late (and the event hasn't started yet).
   var lastCheck = 0;
   function reminders(now) {
-    var list, due = null, changed = false;
-    if (beeping) return;  // something is already ringing: check again once it's stopped
+    var list, due = [], changed = false;
     try { list = JSON.parse(localStorage.getItem("deckEvents") || "[]"); } catch (e) { return; }
     list.forEach(function (e) {
       if (e.fired || e.remind < 0) return;
       var at = e.at - e.remind * 60000;
       if (now < at) return;
       e.fired = true; changed = true;
-      if (now - at < 10 * 60000 && (e.remind === 0 || now < e.at)) due = e;
+      if (now - at < 10 * 60000 && (e.remind === 0 || now < e.at)) due.push(e);
     });
     if (!changed) return;
-    localStorage.setItem("deckEvents", JSON.stringify(list));
-    if (due) {
+    try { localStorage.setItem("deckEvents", JSON.stringify(list)); } catch (e) {}
+    due.forEach(function (due) {  // every reminder that's due rings, one after another
       var start = new Date(due.at), mins = Math.round((due.at - now) / 60000);
       var when = (start.toDateString() === new Date(now).toDateString() ? "" : start.toLocaleDateString([], { weekday: "long" }) + " ") +
         start.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
       ring({ title: due.title, sub: mins > 0 ? when + " · in " + (mins >= 60 ? Math.floor(mins / 60) + " hr" + (mins % 60 ? " " + mins % 60 + " min" : "") : mins + " min") : "Starting now · " + when });
-    }
+    });
     dispatchEvent(new Event("deckreminder"));
   }
 
@@ -103,11 +111,25 @@
       S.tEnd = 0; S.tLeft = S.tSet; save();
       if (late < 10 * 60000) ring();  // finished while another site was open: still ring if it's recent
     }
-    var d = new Date(), m = d.getHours() * 60 + d.getMinutes(), stamp = d.toDateString() + " " + m;
-    if (S.aOn && m === S.aMin && S.aFired !== stamp) { S.aFired = stamp; S.aOn = false; save(); ring(); }
+    // the alarm rings at its set time, or as soon as a deck page is open again within 30 minutes after it
+    // (the screen asleep or showing Google at 7:00 no longer pushes it to tomorrow)
+    if (S.aOn && !S.aAt) { S.aAt = Alarm.next(S.aMin); save(); }
+    if (!S.aOn && S.aAt) { S.aAt = 0; save(); }
+    if (S.aOn && now >= S.aAt) {
+      var lateA = now - S.aAt;
+      S.aOn = false; S.aAt = 0; save();
+      if (lateA < 30 * 60000) ring();
+    }
     if (now - lastCheck > 1000) { lastCheck = now; reminders(now); }
     if (window.onAlarmTick) window.onAlarmTick();
   }, 250);
 
-  window.Alarm = { S: S, save: save };
+  window.Alarm = {
+    S: S, save: save,
+    next: function (min) {  // the next time the clock shows this minute of the day, as ms
+      var d = new Date(), t = new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(min / 60), min % 60);
+      if (+t <= +d) t = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, Math.floor(min / 60), min % 60);
+      return +t;
+    }
+  };
 })();

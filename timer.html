@@ -157,7 +157,7 @@
     var wS = Wheel($("wS"), range(60), function (i) { picked[2] = i; pickTimer(); });
 
     // alarm wheels: changing them moves the alarm time (and keeps it on if it was on)
-    function pickAlarm(h12, m, pm) { S.aMin = (h12 % 12 + (pm ? 12 : 0)) * 60 + m; S.aFired = ""; err = ""; save(); show(); }
+    function pickAlarm(h12, m, pm) { S.aMin = (h12 % 12 + (pm ? 12 : 0)) * 60 + m; S.aAt = 0; err = ""; save(); show(); }
     function aParts() { var h = Math.floor(S.aMin / 60); return [(h % 12 || 12) - 1, S.aMin % 60, h >= 12 ? 1 : 0]; }
     var aH = Wheel($("aH"), range(12, function (i) { return String(i + 1); }), function (i) { var p = aParts(); pickAlarm(i + 1, p[1], p[2]); });
     var aM = Wheel($("aM"), range(60), function (i) { var p = aParts(); pickAlarm(p[0] + 1, i, p[2]); });
@@ -174,7 +174,7 @@
     [[360, "6:00 AM"], [390, "6:30 AM"], [420, "7:00 AM"], [450, "7:30 AM"], [480, "8:00 AM"], [540, "9:00 AM"]].forEach(function (q) {
       var b = document.createElement("button");
       b.textContent = q[1];
-      b.onclick = function () { S.aMin = q[0]; S.aOn = true; S.aFired = ""; err = ""; save(); show(true); };
+      b.onclick = function () { S.aMin = q[0]; S.aOn = true; S.aAt = 0; err = ""; save(); show(true); };
       $("presets").appendChild(b);
     });
 
@@ -182,11 +182,13 @@
     $("tabAlarm").onclick = function () { mode = "alarm"; err = ""; show(true); };
 
     $("go").onclick = function () {
+      // take what the wheels show right now, even if they were flicked a moment ago
+      if (mode === "timer") { if (!running() && !paused()) { wH.commit(); wM.commit(); wS.commit(); } } else { aH.commit(); aM.commit(); aP.commit(); }
       if (mode === "timer") {
         if (running()) { S.tLeft = timeLeft(); S.tEnd = 0; }                  // pause
         else if (S.tLeft > 0) S.tEnd = Date.now() + S.tLeft * 1000;            // start or resume
         else err = "Pick a time on the wheels first";
-      } else { S.aOn = !S.aOn; S.aFired = ""; }
+      } else { S.aOn = !S.aOn; S.aAt = 0; }
       save(); show(true);
     };
     $("reset").onclick = function () {
@@ -195,9 +197,9 @@
       save(); show(true);
     };
 
-    function until(min) {  // how long until the alarm rings
-      var d = new Date(), now = d.getHours() * 60 + d.getMinutes(), m = (min - now + 1440) % 1440 || 1440;
-      return (m >= 60 ? Math.floor(m / 60) + " hr " : "") + (m % 60 ? m % 60 + " min" : "");
+    function until(min) {  // how long until the alarm rings (the same moment alarm.js rings it)
+      var m = Math.max(1, Math.ceil((((S.aOn && S.aAt) || Alarm.next(min)) - Date.now()) / 60000));
+      return ((m >= 60 ? Math.floor(m / 60) + " hr " : "") + (m % 60 ? m % 60 + " min" : "")).trim();
     }
     function status() {  // the small status in the top bar
       $("tState").innerHTML = running() ? "Timer <b>" + short(timeLeft()) + "</b>" : paused() ? "Timer paused · " + short(S.tLeft) : "";

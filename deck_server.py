@@ -83,7 +83,9 @@ def refresh_usage():
         u = json.load(r)
     pick = lambda w: w and {"percent": w.get("utilization") or 0, "resets_at": w.get("resets_at")}
     out = {"updated": datetime.now(timezone.utc).isoformat(), "five_hour": pick(u.get("five_hour")), "weekly": pick(u.get("seven_day"))}
-    (HERE / "usage.json").write_text(json.dumps(out), encoding="utf-8")
+    tmp = HERE / "usage.json.tmp"  # written aside, then swapped in whole, so /usage never reads half a file
+    tmp.write_text(json.dumps(out), encoding="utf-8")
+    os.replace(tmp, HERE / "usage.json")
     return out
 
 
@@ -100,6 +102,7 @@ def usage_loop():
 # (the same info as the volume pop-up) and prints a line about every second. Its cover picture goes to ART.
 NOW = {"playing": False}
 NP_PROC = None  # the running nowplaying.ps1; the deck's skip keys and progress line send it commands
+NP_LOCK = threading.Lock()  # one command at a time, so two taps can't mix their lines
 ART = HERE / "nowplaying-art.bin"
 
 
@@ -250,7 +253,9 @@ class Deck(BaseHTTPRequestHandler):
                 except ValueError:
                     return self._send(400, b"Bad time")
             try:
-                NP_PROC.stdin.write(cmd + "\n"); NP_PROC.stdin.flush()
+                with NP_LOCK:
+                    proc = NP_PROC  # one reference, in case the reader restarts meanwhile
+                    proc.stdin.write(cmd + "\n"); proc.stdin.flush()
             except (AttributeError, OSError):
                 return self._send(503, b"Now playing isn't running")
             return self._send(204)
@@ -268,10 +273,19 @@ def lan_ip():
         return s.getsockname()[0]
 
 
+def lan_ip_or_none():
+    try:
+        return lan_ip()
+    except OSError:  # no network yet (e.g. right after login): still start; the Echo connects once Wi-Fi is up
+        return None
+
+
 if __name__ == "__main__":
     if sys.stderr is None:  # started hidden with pythonw at login: log to a file instead
         sys.stdout = sys.stderr = open(HERE / "deck.log", "a", buffering=1, encoding="utf-8")
-    print(f"Home Deck helper is running at http://{lan_ip()}:{PORT} (the Echo's PC pads call it).")
+    ip = lan_ip_or_none()
+    print(f"Home Deck helper is running at http://{ip}:{PORT} (the Echo's PC pads call it)." if ip
+          else f"Home Deck helper is running on port {PORT} (no network yet).")
     print("Keep this window open. Press Ctrl+C to stop.")
     if SETTINGS.get("claude_usage", True):
         threading.Thread(target=usage_loop, daemon=True).start()

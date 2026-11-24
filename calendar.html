@@ -206,8 +206,8 @@
     if (!m) return { d: new Date(NaN) };
     if (!m[4]) return { d: new Date(+m[1], m[2] - 1, +m[3]), allDay: true };
     var wall = Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
-    if (m[7]) return { d: new Date(wall) };
-    if (tz) try { return { d: new Date(wall - tzAhead(wall - tzAhead(wall, tz), tz)) }; } catch (e) {}  // unknown zone names fall through to local time
+    if (m[7]) return { d: new Date(wall), zone: "UTC" };
+    if (tz) try { return { d: new Date(wall - tzAhead(wall - tzAhead(wall, tz), tz)), zone: tz }; } catch (e) {}  // unknown zone names fall through to local time
     return { d: new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) };
   }
   function parseICS(text, c) {
@@ -220,7 +220,7 @@
         var head = line.slice(0, i).split(";"), val = line.slice(i + 1), tz = (/;TZID="?([^;:"]+)/.exec(line.slice(0, i)) || [])[1];
         switch (head[0]) {
           case "SUMMARY": cur.title = val.replace(/\\n/gi, " ").replace(/\\([,;\\])/g, "$1"); break;
-          case "DTSTART": var p = parseDate(val, tz); cur.start = p.d; cur.allDay = p.allDay; break;
+          case "DTSTART": var p = parseDate(val, tz); cur.start = p.d; cur.allDay = p.allDay; cur.zone = p.zone; break;
           case "DTEND": cur.end = parseDate(val, tz).d; break;
           case "RRULE": cur.rule = {}; val.split(";").forEach(function (kv) { kv = kv.split("="); cur.rule[kv[0]] = kv[1]; }); break;
           case "EXDATE": val.split(",").forEach(function (v) { cur.ex.push(+parseDate(v, tz).d); }); break;
@@ -239,7 +239,8 @@
 
   // ---------- repeating events ----------
   // shortcut: covers DAILY/WEEKLY/MONTHLY/YEARLY with INTERVAL, COUNT, UNTIL, BYDAY (incl. "2TU", "-1FR"), BYMONTHDAY, BYMONTH.
-  // BYSETPOS and hourly rules are not handled; repeats keep the first event's clock time in the Echo's time zone.
+  // BYSETPOS and hourly rules are not handled. Repeats are worked out on the event's own clock (its time zone, UTC,
+  // or the Echo's), so a 3 PM meeting stays at 3 PM in its zone across daylight-saving changes.
   function dayNo(d) { return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY); }
   function fromDayNo(n, t) { var u = new Date(n * DAY); return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), t.getHours(), t.getMinutes(), t.getSeconds()); }
   function list(v, f) { return v ? v.split(",").map(f || Number) : null; }
@@ -252,31 +253,51 @@
     function onDate(def) { return (bymd || [def]).some(function (m) { return d.getDate() === (m > 0 ? m : dim + m + 1); }); }
     var months = (d.getFullYear() - s.getFullYear()) * 12 + d.getMonth() - s.getMonth();
     switch (r.FREQ) {
-      case "DAILY": return (dn - sn) % iv === 0 && (!byday || onDay());
+      case "DAILY": return (dn - sn) % iv === 0 && (!byday || onDay()) && (!bymd || onDate());
       case "WEEKLY":
         var ws = WD[r.WKST || "MO"], w0 = sn - (s.getDay() - ws + 7) % 7, w1 = dn - (wd - ws + 7) % 7;
-        return ((w1 - w0) / 7) % iv === 0 && (byday ? onDay() : wd === s.getDay());
+        return ((w1 - w0) / 7) % iv === 0 && (byday ? onDay() : wd === s.getDay()) && (!bymd || onDate());
       case "MONTHLY": return months % iv === 0 && (byday ? onDay() && (!bymd || onDate()) : onDate(s.getDate()));
       case "YEARLY":
         if ((d.getFullYear() - s.getFullYear()) % iv || (!bymo && d.getMonth() !== s.getMonth())) return false;
-        return byday ? onDay() : onDate(s.getDate());
+        return byday ? onDay() && (!bymd || onDate()) : onDate(s.getDate());
     }
     return false;
   }
+  // the event's clock: its start's date and time as they read in its own zone (a plain local Date that just carries them)
+  function wallOf(e) {
+    var t = +e.start;
+    if (e.zone === "UTC") { var u = new Date(t); return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), u.getUTCHours(), u.getUTCMinutes(), u.getUTCSeconds()); }
+    if (e.zone) try { var z = new Date(t + tzAhead(t, e.zone)); return new Date(z.getUTCFullYear(), z.getUTCMonth(), z.getUTCDate(), z.getUTCHours(), z.getUTCMinutes(), z.getUTCSeconds()); } catch (x) {}
+    return new Date(t);
+  }
+  // the real moment that a clock reading (a wall Date as above) means in the event's zone
+  function instant(w, zone) {
+    var wall = Date.UTC(w.getFullYear(), w.getMonth(), w.getDate(), w.getHours(), w.getMinutes(), w.getSeconds());
+    if (zone === "UTC") return new Date(wall);
+    if (zone) try { return new Date(wall - tzAhead(wall - tzAhead(wall, zone), zone)); } catch (x) {}
+    return w;
+  }
   // every occurrence of an event that overlaps [from, to)
   function occurrences(e, from, to) {
-    var len = e.end ? e.end - e.start : (e.allDay ? DAY : 0), out = [];
-    function add(s) { if (+s < +to && +s + Math.max(len, 1) > +from) out.push({ s: s, e: new Date(+s + len), ev: e }); }
+    // all-day events last whole calendar days (counting days, not hours, so a daylight-saving day doesn't spill over)
+    var days = e.allDay ? Math.max(1, e.end ? Math.round((dayNo(e.end) - dayNo(e.start))) : 1) : 0;
+    var len = e.end ? e.end - e.start : 0, out = [];
+    function add(s) {
+      var end = e.allDay ? new Date(s.getFullYear(), s.getMonth(), s.getDate() + days) : new Date(+s + len);
+      if (+s < +to && Math.max(+end, +s + 1) > +from) out.push({ s: s, e: end, ev: e });
+    }
     if (!e.rule) { add(e.start); return out; }
-    var r = e.rule, sn = dayNo(e.start), max = r.COUNT ? +r.COUNT : Infinity, count = 0;
+    var r = e.rule, w = wallOf(e), sn = dayNo(w), max = r.COUNT ? +r.COUNT : Infinity, count = 0;
     var until = r.UNTIL ? parseDate(r.UNTIL).d : null; if (until && r.UNTIL.length === 8) until = new Date(+until + DAY - 1);
-    var n = r.COUNT ? sn : Math.max(sn, dayNo(from) - Math.ceil(len / DAY) - 1);  // with COUNT we must count from the first one
-    for (var end = dayNo(to); n <= end && count < max; n++) {
-      var d = fromDayNo(n, e.start);
-      if (until && d > until) break;
-      if (!fits(r, e.start, d, sn, n)) continue;
+    var span = e.allDay ? days : Math.ceil(len / DAY);
+    var n = r.COUNT ? sn : Math.max(sn, dayNo(from) - span - 2);  // with COUNT we must count from the first one
+    for (var end = dayNo(to) + 1; n <= end && count < max; n++) {
+      var d = fromDayNo(n, w), at = instant(d, e.zone);
+      if (until && at > until) break;
+      if (!fits(r, w, d, sn, n)) continue;
       count++;
-      if (e.ex.indexOf(+d) < 0 && !e.skip[+d]) add(d);
+      if (e.ex.indexOf(+at) < 0 && !e.skip[+at]) add(at);
     }
     return out;
   }
@@ -424,13 +445,14 @@
         : "The deck rings " + (ring.toDateString() === at.toDateString() ? "at " + time(ring) : ring.toLocaleDateString([], { weekday: "short" }) + " at " + time(ring)) + (ed.remind ? ", " + REMIND.filter(function (r) { return r[0] === ed.remind; })[0][1] + " before" : ""));
   }
   function esc(t) { return t.replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
-  function closeSheet() { document.getElementById("sheet").hidden = true; document.getElementById("sName").blur(); ed = null; }
+  function closeSheet() { eH.cancel(); eM.cancel(); eP.cancel(); document.getElementById("sheet").hidden = true; document.getElementById("sName").blur(); ed = null; }
   document.getElementById("add").onclick = function () { openSheet(null); };
   document.getElementById("sCancel").onclick = closeSheet;
   document.getElementById("sName").oninput = drawSheet;
   document.getElementById("sPrev").onclick = function () { ed.day = new Date(ed.day.getFullYear(), ed.day.getMonth(), ed.day.getDate() - 1); drawSheet(); };
   document.getElementById("sNext").onclick = function () { ed.day = new Date(ed.day.getFullYear(), ed.day.getMonth(), ed.day.getDate() + 1); drawSheet(); };
   document.getElementById("sSave").onclick = function () {
+    eH.commit(); eM.commit(); eP.commit();  // take what the wheels show right now
     var list = mineList(), at = +startOf(), name = document.getElementById("sName").value.trim() || "Event";
     var e = { id: ed.id || String(Date.now()), title: name, at: at, remind: ed.remind, fired: ed.remind < 0 || at - ed.remind * 60000 <= Date.now() };  // a reminder time that's already gone never rings
     list = list.filter(function (x) { return x.id !== e.id; }).concat([e]).sort(function (a, b) { return a.at - b.at; });

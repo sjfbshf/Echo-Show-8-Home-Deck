@@ -53,14 +53,24 @@ def main():
         if "<map" not in prefs:  # some adb versions print "Permission denied" but still exit 0
             raise subprocess.CalledProcessError(1, "cat")
         if START_URL not in prefs:
-            prefs = re.sub(r'<string name="startURL">.*?</string>', f'<string name="startURL">{START_URL}</string>', prefs)
+            line = f'<string name="startURL">{START_URL}</string>'
+            if re.search(r'<string name="startURL">.*?</string>', prefs):
+                prefs = re.sub(r'<string name="startURL">.*?</string>', line, prefs)
+            else:  # a fresh Fully has no start page saved yet: add one
+                prefs = prefs.replace("</map>", f"    {line}\n</map>")
             with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False, encoding="utf-8", newline="\n") as t:
                 t.write(prefs.replace("\r\n", "\n"))
-            adb("push", t.name, "/data/local/tmp/fully.xml")
-            adb("shell", f"cat /data/local/tmp/fully.xml > {PREFS} && rm /data/local/tmp/fully.xml")  # cat keeps the file's owner
-            Path(t.name).unlink()
-    except subprocess.CalledProcessError:
-        print(f"No root, so Fully's start page wasn't changed. In Fully, set Settings > Web Content > Start URL to:\n  {START_URL}")
+            try:
+                adb("push", t.name, "/data/local/tmp/fully.xml")
+                adb("shell", f"cat /data/local/tmp/fully.xml > {PREFS}")  # cat keeps the file's owner
+            finally:  # never leave copies of Fully's settings behind
+                Path(t.name).unlink(missing_ok=True)
+                subprocess.run([ADB, "shell", "rm -f /data/local/tmp/fully.xml"], capture_output=True)
+            if START_URL not in adb("shell", f"cat {PREFS}"):
+                raise RuntimeError("Fully's start page didn't save")
+    except (subprocess.CalledProcessError, RuntimeError) as e:
+        why = "Couldn't change Fully's start page" if isinstance(e, RuntimeError) else "No root, so Fully's start page wasn't changed"
+        print(f"{why}. In Fully, set Settings > Web Content > Start URL to:\n  {START_URL}")
     # Fully asks for this once its start page is a file; granting it here skips the dialog
     try:
         adb("shell", "pm grant de.ozerov.fully android.permission.READ_EXTERNAL_STORAGE")
