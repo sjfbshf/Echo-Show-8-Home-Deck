@@ -87,7 +87,9 @@ The helper reads the Claude sign-in that Claude Code saves on your PC (`~/.claud
 The card at the bottom right shows what your PC is playing: anything that appears in the Windows volume pop-up, like YouTube in a browser, Spotify or Media Player.
 
 - **The keys:** play/pause, and back or forward 10 seconds. You can also tap anywhere on the progress line to jump there.
-- **Next and previous track** appear only when the app supports them. YouTube in a browser doesn't, unless you're playing a playlist. Spotify does.
+- **Next and previous track** appear only when the app supports them. YouTube in a browser doesn't, unless you're playing a playlist. Spotify does, and pressing previous after the first few seconds restarts the song.
+- **If several things play,** the card shows the one that's actually playing, not a paused video.
+- **Some Spotify installs don't share what they play with Windows.** The card then reads the song from Spotify's window title instead, so it shows the title and artist but no cover or progress line.
 - **How it works:** `nowplaying.ps1` reads Windows' media controls about once a second. The PC helper starts it, and it needs nothing installed.
 
 ### "Alexa, open sesame" (Echo only, optional)

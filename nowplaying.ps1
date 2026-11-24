@@ -23,7 +23,17 @@ $in = New-Object System.IO.StreamReader ([Console]::OpenStandardInput()); $cmd =
 while ($true) {
   $out = @{ playing = $false }
   try {
-    $s = $mgr.GetCurrentSession()
+    # whatever is actually playing wins; Windows' own "current" player can be a paused video
+    $s = @($mgr.GetSessions()) | Where-Object { [string]$_.GetPlaybackInfo().PlaybackStatus -eq "Playing" } | Select-Object -First 1
+    # Some Spotify installs never join Windows' media list, but they put "Artist - Song" in their window title
+    # while playing ("Spotify Premium" when paused) and obey the PC's next/previous keys
+    $spot = if (-not $s) { Get-Process Spotify -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -match ' - ' } | Select-Object -First 1 -ExpandProperty MainWindowTitle }
+    if (-not $s -and $spot) {
+      $i = $spot.IndexOf(" - "); $lastArt = ""
+      $out = @{ playing = $true; status = "Playing"; title = $spot.Substring($i + 3); artist = $spot.Substring(0, $i); app = "Spotify"
+                position = 0; length = 0; art = 0; next = $true; prev = $true; seek = $false; keys = $true }  # keys: skip with the PC's media keys
+    }
+    if (-not $s -and -not $spot) { $s = $mgr.GetCurrentSession() }
     if ($s) {
       $p = Wait-Op ($s.TryGetMediaPropertiesAsync()) $TProps
       $tl = $s.GetTimelineProperties()

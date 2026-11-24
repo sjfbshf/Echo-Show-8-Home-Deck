@@ -112,7 +112,7 @@
   .prog { height: 5px; border-radius: 3px; background: rgba(160,190,230,.12); overflow: hidden; margin-top: 4px; }
   .prog i { display: block; height: 100%; width: 0; border-radius: 3px; background: linear-gradient(90deg, var(--accent), #ffd98a); transition: width .3s linear; }
   .times { display: flex; justify-content: space-between; font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; margin-top: -2px; }
-  .media.idle .prog, .media.idle .times { visibility: hidden; }
+  .media.idle .prog, .media.idle .times, .media.no-time .prog, .media.no-time .times { visibility: hidden; }
   .keys { display: flex; gap: 10px; margin-top: 2px; }
   .key[hidden] { display: none; }
   .keys .key { flex: 1; width: auto; }  /* the keys share the row, however many the app allows */
@@ -299,6 +299,9 @@
       document.getElementById("npBar").style.width = (at / n.length * 100) + "%";
       document.getElementById("npAt").textContent = mmss(at);
       document.getElementById("npLeft").textContent = "-" + mmss(n.length - at);
+    } else if (on && n.keys) {  // Spotify read from its window title: no times
+      document.getElementById("npBar").style.width = "0";
+      document.getElementById("npAt").textContent = document.getElementById("npLeft").textContent = "";
     } else if (on) {  // live streams and some apps don't say how long
       document.getElementById("npBar").style.width = "0";
       document.getElementById("npAt").textContent = n.playing ? "Live" : "";
@@ -310,6 +313,7 @@
     var seek = !!(on && n.seek && n.length > 0);
     document.getElementById("npBack").hidden = document.getElementById("npFwd").hidden = !seek;
     mediaEl.classList.toggle("can-seek", seek);
+    mediaEl.classList.toggle("no-time", !!(on && n.keys));
     var art = on ? n.art : 0;
     if (art !== npArt) {
       npArt = art;
@@ -343,8 +347,9 @@
   }
   document.getElementById("npBack").onclick = function () { jumpTo(npNow() - 10); };
   document.getElementById("npFwd").onclick = function () { jumpTo(npNow() + 10); };
-  document.getElementById("npPrev").onclick = function () { npSend("/np/prev"); };
-  document.getElementById("npNext").onclick = function () { npSend("/np/next"); };
+  // Spotify read from its window title ("keys") is skipped with the PC's media keys; the rest through Windows' media list
+  document.getElementById("npPrev").onclick = function () { npSend(NP && NP.keys ? "/key/prev" : "/np/prev"); };
+  document.getElementById("npNext").onclick = function () { npSend(NP && NP.keys ? "/key/next" : "/np/next"); };
   document.getElementById("npSeek").onclick = function (e) {
     var bar = this.querySelector(".prog"), r = bar.getBoundingClientRect();
     if (NP && NP.length > 0) jumpTo((e.clientX - r.left) / r.width * NP.length);
