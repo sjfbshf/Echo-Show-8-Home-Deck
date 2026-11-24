@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- only listens to Alexa's screen (com.amazon.ambienthome), nothing else -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:packageNames="com.amazon.ambienthome"
+    android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews|flagRetrieveInteractiveWindows"
+    android:notificationTimeout="250"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/desc" />

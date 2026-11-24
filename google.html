@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google</title>
+<style>
+  /* Google inside our own page, so the home button stays on screen.
+     igu=1 is Google's embeddable mode; Fully's own toolbar would need a PLUS license.
+     Sites opened from the results that refuse to be framed show an error here: tap home and try again. */
+  html, body { height: 100%; margin: 0; background: #070b12; }
+  body { display: flex; overflow: hidden; }
+  .home {
+    flex: none; width: 60px; border: 0; border-right: 1px solid rgba(160,190,230,.12);
+    background: linear-gradient(170deg, #121b28, #0e1520); color: #f2b84b; font-size: 30px; cursor: pointer;
+  }
+  .home:active { background: #1a2638; }
+  iframe { flex: 1; border: 0; background: #fff; }
+</style>
+</head>
+<body>
+  <button class="home" aria-label="Back to deck" onclick="location.href='index.html'">&#8962;</button>
+  <iframe src="https://www.google.com/webhp?igu=1" title="Google"></iframe>
+  <script src="alarm.js"></script>  <!-- timers and alarms still ring here -->
+</body>
+</html>

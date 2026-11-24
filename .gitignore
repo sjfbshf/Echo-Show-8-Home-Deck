@@ -1,0 +1,17 @@
+# your own settings and secrets: never upload these
+settings.json
+.deck-key
+calendar-url.txt
+
+# made while running
+deck.log
+usage.json
+config.js
+pads.js
+__pycache__/
+echo-app/out/
+
+# local only
+deck-screenshot.png
+index-classic.html
+index-night-console.html

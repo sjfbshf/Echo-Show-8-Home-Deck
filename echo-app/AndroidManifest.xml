@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.homedeck.opensesame" android:versionCode="1" android:versionName="1.0">
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="28" />
+    <application android:label="Open Sesame" android:allowBackup="false">
+        <!-- Reads Alexa's on-screen words; when the newest request is "open sesame", it brings the deck (Fully) to the front. -->
+        <service android:name=".OpenSesame" android:label="Open Sesame (home deck)"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/opensesame" />
+        </service>
+    </application>
+</manifest>

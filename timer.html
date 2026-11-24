@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timer and alarm</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;500;650&display=swap" rel="stylesheet">
+<style>
+  /* Timer and alarm on the Echo. Type the time on the keypad (like a microwave), or tap a quick-start button.
+     The state lives in alarm.js, so both keep running and ringing on the deck. */
+  :root { --bg:#070b12; --card:#0e1520; --line:rgba(160,190,230,.12); --text:#eef2f8; --dim:#7f8aa0; --accent:#f2b84b; --bad:#ff6b6b; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(ellipse at 50% 50%, #0d1524 0%, var(--bg) 70%);
+    color: var(--text); font-family: "Sora", "Segoe UI", Roboto, sans-serif;
+    display: grid; grid-template-columns: 72px minmax(0, 1fr) minmax(0, 400px); gap: 20px; padding: 26px 28px;
+    overflow: hidden; -webkit-user-select: none; user-select: none;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--line); background: linear-gradient(170deg,#121b28,var(--card)); border-radius: 18px; }
+  button:active { transform: scale(.97); border-color: var(--accent); }
+  button:disabled { opacity: .35; }
+  .home { font-size: 34px; color: var(--dim); }
+  .panel { border: 1px solid var(--line); border-radius: 24px; background: rgba(14,21,32,.6); padding: 22px 26px; min-height: 0; }
+
+  .main { display: flex; flex-direction: column; gap: 18px; }
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .tab { height: 86px; display: flex; align-items: center; gap: 14px; padding: 0 18px; text-align: left; font-size: 26px; font-weight: 500; }
+  .tab img { width: 48px; height: 48px; }
+  .tab small { display: block; font-size: 15px; font-weight: 300; color: var(--dim); margin-top: 2px; }
+  .tab.on { border-color: var(--accent); background: rgba(242,184,75,.1); }
+  .tab .live { color: var(--accent); }
+
+  .display { flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .seg { text-align: center; }
+  .seg b { display: block; font-size: 140px; font-weight: 300; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .seg span { font-size: 15px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+  .colon { font-size: 110px; font-weight: 300; color: var(--dim); padding-bottom: 34px; }
+  .typing .seg b { color: var(--accent); }
+  .ampm { display: flex; flex-direction: column; gap: 10px; margin-left: 18px; padding-bottom: 30px; }
+  .ampm button { width: 96px; height: 60px; font-size: 24px; }
+  .ampm button.on { border-color: var(--accent); color: var(--accent); background: rgba(242,184,75,.1); }
+
+  .msg { text-align: center; font-size: 18px; color: var(--dim); min-height: 24px; }
+  .msg.bad { color: var(--bad); }
+  .label { font-size: 13px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
+  .quick { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .quick button { height: 64px; font-size: 22px; }
+  .actions { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+  .actions button { height: 84px; font-size: 28px; font-weight: 500; }
+  .go { color: var(--accent); border-color: rgba(242,184,75,.45) !important; }
+
+  .keys { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 12px; }
+  .keys button { font-size: 46px; font-weight: 300; }
+  .keys .small { font-size: 22px; font-weight: 500; color: var(--dim); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <button class="home" id="home" aria-label="Back to deck">&#8962;</button>
+
+  <section class="panel main">
+    <div class="tabs">
+      <button class="tab" id="tabTimer"><img src="https://api.iconify.design/fluent-emoji-flat/hourglass-not-done.svg" alt=""><span>Timer<small id="tState">Off</small></span></button>
+      <button class="tab" id="tabAlarm"><img src="https://api.iconify.design/fluent-emoji-flat/alarm-clock.svg" alt=""><span>Alarm<small id="aState">Off</small></span></button>
+    </div>
+
+    <div class="display" id="display"></div>
+    <div class="msg" id="msg"></div>
+
+    <div id="quickWrap">
+      <div class="label">Quick start</div>
+      <div class="quick" id="quick"></div>
+    </div>
+
+    <div class="actions">
+      <button class="go" id="go"></button>
+      <button id="clear"></button>
+    </div>
+  </section>
+
+  <section class="panel keys" id="keys" aria-label="Keypad"></section>
+
+<script>
+  document.getElementById("home").onclick = function () { location.href = "index.html"; };
+  var $ = function (id) { return document.getElementById(id); };
+  function two(n) { return (n < 10 ? "0" : "") + n; }
+  function hms(sec) { return [Math.floor(sec / 3600), Math.floor(sec % 3600 / 60), sec % 60]; }
+  function clockText(min) { var h = Math.floor(min / 60), m = min % 60; return (h % 12 || 12) + ":" + two(m) + " " + (h < 12 ? "AM" : "PM"); }
+  function short(sec) { var t = hms(sec); return (t[0] ? t[0] + ":" + two(t[1]) : t[1]) + ":" + two(t[2]); }
+
+  function init() {
+    var S = Alarm.S, save = Alarm.save;
+    var mode = "timer", buf = "", pm = S.aMin >= 720, err = "";
+    var digits = [];
+
+    // keypad: digits fill from the right, like a microwave (type 1 3 0 = 1 min 30 sec)
+    var keys = $("keys");
+    ["1","2","3","4","5","6","7","8","9","Clear","0","⌫"].forEach(function (k) {
+      var b = document.createElement("button");
+      b.textContent = k;
+      if (k.length > 1 || k === "⌫") b.className = "small";
+      b.onclick = function () {
+        err = "";
+        if (k === "Clear") buf = "";
+        else if (k === "⌫") buf = buf.slice(0, -1);
+        else if (buf.length < (mode === "timer" ? 6 : 4)) buf = (buf + k).replace(/^0+/, "");
+        show();
+      };
+      keys.appendChild(b); digits.push(b);
+    });
+
+    // quick-start timers: one tap sets and starts
+    [[60, "1 min"], [300, "5 min"], [600, "10 min"], [900, "15 min"], [1800, "30 min"], [3600, "1 hr"]].forEach(function (q) {
+      var b = document.createElement("button");
+      b.textContent = q[1];
+      b.onclick = function () { buf = ""; S.tSet = S.tLeft = q[0]; S.tEnd = Date.now() + q[0] * 1000; save(); show(); };
+      $("quick").appendChild(b);
+    });
+
+    $("tabTimer").onclick = function () { mode = "timer"; buf = ""; err = ""; show(); };
+    $("tabAlarm").onclick = function () { mode = "alarm"; buf = ""; err = ""; pm = S.aMin >= 720; show(); };
+
+    function timeLeft() { return S.tEnd ? Math.max(0, Math.ceil((S.tEnd - Date.now()) / 1000)) : S.tLeft; }
+    function typedSeconds() { var p = ("000000" + buf).slice(-6); return +p.slice(0, 2) * 3600 + +p.slice(2, 4) * 60 + +p.slice(4); }
+    function typedAlarm() {  // returns minutes since midnight, or null if not a real time
+      var p = ("0000" + buf).slice(-4), h = +p.slice(0, 2), m = +p.slice(2);
+      if (h < 1 || h > 12 || m > 59) return null;
+      return (h % 12 + (pm ? 12 : 0)) * 60 + m;
+    }
+
+    $("go").onclick = function () {
+      if (mode === "timer") {
+        if (S.tEnd) { S.tLeft = timeLeft(); S.tEnd = 0; }            // pause
+        else {
+          if (buf) { S.tSet = S.tLeft = typedSeconds(); buf = ""; }   // start what was typed
+          if (S.tLeft > 0) S.tEnd = Date.now() + S.tLeft * 1000; else err = "Type a time first";
+        }
+      } else {
+        if (S.aOn && !buf) S.aOn = false;                             // cancel
+        else {
+          var t = buf ? typedAlarm() : S.aMin;
+          if (t == null) err = "That isn't a real time. Try again.";
+          else { S.aMin = t; S.aOn = true; S.aFired = ""; buf = ""; }
+        }
+      }
+      save(); show();
+    };
+    $("clear").onclick = function () {
+      err = ""; buf = "";
+      if (mode === "timer") { S.tEnd = 0; S.tSet = S.tLeft = 0; } else S.aOn = false;  // Reset clears the timer to 00:00:00
+      save(); show();
+    };
+
+    function setHalf(isPm) {
+      pm = isPm;
+      if (!buf) { S.aMin = S.aMin % 720 + (pm ? 720 : 0); save(); }  // nothing typed: move the current alarm time
+      show();
+    }
+    function seg(v, label) { return '<div class="seg"><b>' + v + "</b><span>" + label + "</span></div>"; }
+    var colon = '<div class="colon">:</div>';
+
+    function tabs() {  // the small status under each tab; cheap, so it updates every tick
+      var running = !!S.tEnd, left = timeLeft();
+      $("tabTimer").classList.toggle("on", mode === "timer");
+      $("tabAlarm").classList.toggle("on", mode === "alarm");
+      $("tState").innerHTML = running ? '<span class="live">Running · ' + short(left) + " left</span>" : (S.tLeft > 0 && S.tLeft < S.tSet ? "Paused · " + short(S.tLeft) : "Off");
+      $("aState").innerHTML = S.aOn ? '<span class="live">On · ' + clockText(S.aMin) + "</span>" : "Off";
+    }
+    function show() {
+      var running = !!S.tEnd, left = timeLeft();
+      tabs();
+      $("quickWrap").hidden = mode !== "timer";
+      var d = $("display"); d.classList.toggle("typing", !!buf);
+
+      if (mode === "timer") {
+        var t = buf ? ("000000" + buf).slice(-6).match(/../g) : hms(left).map(two);
+        d.innerHTML = seg(t[0], "hours") + colon + seg(t[1], "minutes") + colon + seg(t[2], "seconds");
+        $("go").textContent = running ? "Pause" : (S.tLeft > 0 && S.tLeft < S.tSet && !buf ? "Resume" : "Start");
+        $("clear").textContent = "Reset";
+        $("msg").textContent = err || (running ? "Keeps running on the deck" : "Type a time on the keypad, or tap a quick start");
+        digits.forEach(function (b) { b.disabled = running; });
+      } else {
+        var p = buf ? ("0000" + buf).slice(-4) : null;
+        var h = p ? p.slice(0, 2) : two(Math.floor(S.aMin / 60) % 12 || 12), m = p ? p.slice(2) : two(S.aMin % 60);
+        if (!buf) pm = S.aMin >= 720;
+        d.innerHTML = seg(h, "hour") + colon + seg(m, "minute") +
+          '<div class="ampm"><button id="am" class="' + (pm ? "" : "on") + '">AM</button><button id="pm" class="' + (pm ? "on" : "") + '">PM</button></div>';
+        $("am").onclick = function () { setHalf(false); };
+        $("pm").onclick = function () { setHalf(true); };
+        $("go").textContent = S.aOn && !buf ? "Cancel alarm" : "Set alarm";
+        $("clear").textContent = "Clear";
+        $("msg").textContent = err || (S.aOn && !buf ? "Rings at " + clockText(S.aMin) + ", also on the deck" : "Type the time on the keypad, then pick AM or PM");
+        digits.forEach(function (b) { b.disabled = false; });
+      }
+      $("msg").className = "msg" + (err ? " bad" : "");
+    }
+    // redraw while the timer counts down, or when alarm.js changed something (a timer finished, an alarm rang);
+    // otherwise leave the screen alone so taps aren't lost to a redraw
+    var last = "";
+    window.onAlarmTick = function () {
+      var now = JSON.stringify(S);
+      if ((S.tEnd && mode === "timer") || now !== last) show(); else tabs();
+      last = now;
+    };
+    show();
+  }
+
+  var js = document.createElement("script");
+  js.src = "alarm.js";
+  js.onload = init;
+  document.body.appendChild(js);
+
+  // same fit as the deck: designed at 1280x800, shrunk to the Echo's ~853x533
+  function fit() {
+    var s = document.body.style, z = Math.min(innerWidth / 1280, innerHeight / 800);
+    s.zoom = z < 1 ? z : ""; s.width = z < 1 ? "1280px" : ""; s.height = z < 1 ? "800px" : "";
+  }
+  fit(); addEventListener("resize", fit);
+</script>
+</body>
+</html>

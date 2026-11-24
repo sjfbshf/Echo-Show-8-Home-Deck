@@ -1,0 +1,15 @@
+{
+  "_help": "Left pads (\"url\") open on the Echo itself; right pads (\"pc\") open on your PC and need a unique \"id\". A \"url\" is an https:// link or a page from this folder like timer.html. Each side has room for 4 pads. \"icon\" is the logo shown (find more at icon-sets.iconify.design); \"name\" is never shown, only read out by screen readers. After editing, run sync_echo.py (copies the deck to the Echo) and restart the deck helper.",
+  "left": [
+    { "name": "Weather",  "c": "#6fd3ff", "icon": "https://api.iconify.design/meteocons/partly-cloudy-day-fill.svg", "url": "weather.html" },
+    { "name": "Alarm and timer", "c": "#f2b84b", "icon": "https://api.iconify.design/fluent-emoji-flat/alarm-clock.svg", "url": "timer.html" },
+    { "name": "Calendar", "c": "#4285f4", "icon": "https://api.iconify.design/logos/google-calendar.svg", "url": "calendar.html" },
+    { "name": "Google",   "c": "#4285f4", "icon": "https://api.iconify.design/logos/google-icon.svg", "url": "google.html" }
+  ],
+  "right": [
+    { "id": "claude",   "name": "Claude",   "c": "#d97757", "icon": "https://api.iconify.design/logos/claude-icon.svg", "pc": "shell:AppsFolder\\Claude_pzs8sxrjxfjjc!Claude" },
+    { "id": "chatgpt",  "name": "ChatGPT",  "c": "#e8ecf2", "icon": "https://api.iconify.design/simple-icons/openai.svg?color=white", "pc": "shell:AppsFolder\\OpenAI.Codex_2p2nqsd0c76g0!App" },
+    { "id": "terminal", "name": "Terminal", "c": "#c7d5e0", "icon": "https://api.iconify.design/simple-icons/windowsterminal.svg?color=white", "pc": "shell:AppsFolder\\Microsoft.WindowsTerminal_8wekyb3d8bbwe!App" },
+    { "id": "obsidian", "name": "Obsidian", "c": "#a882ff", "icon": "https://api.iconify.design/logos/obsidian-icon.svg", "pc": "shell:AppsFolder\\md.obsidian" }
+  ]
+}

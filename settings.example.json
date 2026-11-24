@@ -1,0 +1,13 @@
+{
+  "_help": "Copy this file to settings.json and fill it in (settings.json stays on your PC and is never uploaded). Then run: python sync_echo.py",
+  "weather": {
+    "place": "New York",
+    "label": "10001",
+    "latitude": 40.7506,
+    "longitude": -73.9972,
+    "units": "us"
+  },
+  "calendars": [],
+  "claude_usage": true,
+  "adb": ""
+}

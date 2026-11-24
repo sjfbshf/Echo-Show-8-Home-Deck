@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather</title>
+<!-- made by sync_echo.py from settings.json: your place for the forecast -->
+<script src="config.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;500;650&display=swap" rel="stylesheet">
+<style>
+  /* Weather from Open-Meteo (free, no key, no ads) for the place in settings.json. Same look as the deck. */
+  :root { --bg:#070b12; --card:#0e1520; --line:rgba(160,190,230,.12); --text:#eef2f8; --dim:#7f8aa0; --faint:#4c566a;
+          --accent:#f2b84b; --cool:#6fd3ff; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(ellipse at 50% 40%, #0d1524 0%, var(--bg) 70%);
+    color: var(--text); font-family: "Sora", "Segoe UI", Roboto, sans-serif;
+    display: grid; grid-template-columns: minmax(0, 400px) minmax(0, 1fr); grid-template-rows: 60px minmax(0, 300px) minmax(0, 1fr);
+    gap: 18px; padding: 22px 26px; overflow: hidden; -webkit-user-select: none; user-select: none;
+  }
+  .panel { border: 1px solid var(--line); border-radius: 24px; background: rgba(14,21,32,.6); padding: 18px 24px; min-height: 0; min-width: 0; }
+  .label { font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+
+  /* top bar: home, place, last update */
+  .top { grid-column: 1 / 3; display: flex; align-items: center; gap: 18px; }
+  .home { display: flex; align-items: center; gap: 10px; height: 60px; padding: 0 22px 0 18px; font: inherit; font-size: 18px; color: var(--text);
+          border: 1px solid var(--line); background: linear-gradient(170deg,#121b28,var(--card)); border-radius: 18px; cursor: pointer; }
+  .home svg { width: 26px; height: 26px; }
+  .home:active { border-color: var(--accent); }
+  .place { font-size: 22px; font-weight: 500; }
+  .place span { color: var(--dim); font-weight: 300; margin-left: 8px; }
+  .updated { margin-left: auto; font-size: 15px; color: var(--dim); }
+  .updated.off { color: #ff8a6b; }
+
+  /* now */
+  .now { grid-row: 2 / 4; display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 22px; }
+  .now img { width: 190px; height: 190px; margin: auto 0 -18px; }
+  .temp { font-size: 112px; font-weight: 300; letter-spacing: -.04em; line-height: 1; }
+  .temp sup { font-size: 40px; vertical-align: top; position: relative; top: 12px; color: var(--dim); }
+  .cond { font-size: 26px; margin-top: 6px; }
+  .hilo { font-size: 18px; color: var(--dim); margin-top: 6px; }
+  .hilo b { color: var(--text); font-weight: 500; }
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: 100%; margin-top: auto; padding-top: 18px; }
+  .tile { text-align: left; border: 1px solid var(--line); border-radius: 16px; padding: 12px 16px; background: rgba(7,11,18,.45); }
+  .tile .label { font-size: 11px; }
+  .tile b { display: block; font-size: 26px; font-weight: 500; margin-top: 4px; }
+  .tile small { font-size: 14px; color: var(--dim); font-weight: 300; }
+
+  /* hourly: swipe sideways through the whole week */
+  .hours { display: flex; flex-direction: column; gap: 8px; padding-right: 0; padding-left: 0; }
+  .hours .head { display: flex; justify-content: space-between; padding: 0 24px; }
+  .hint { font-size: 12px; color: var(--dim); }
+  .scroll { position: relative; flex: 1; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+            -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 24px, #000 calc(100% - 40px), transparent); }
+  .scroll::-webkit-scrollbar { display: none; }
+  .track { position: relative; height: 100%; display: flex; padding: 0 24px; }
+  .h { flex: 0 0 84px; display: flex; flex-direction: column; align-items: center; position: relative; z-index: 1; }
+  .h .t { font-size: 15px; color: var(--dim); height: 22px; }
+  .h.day { border-left: 1px solid var(--line); }
+  .h.day .t { color: var(--accent); font-weight: 650; letter-spacing: .04em; }
+  .h img { width: 54px; height: 54px; margin-top: 2px; }
+  .h .rain { margin-top: auto; font-size: 13px; color: var(--faint); display: flex; align-items: center; gap: 3px; height: 20px; }
+  .h .rain.wet { color: var(--cool); }
+  .drop { width: 10px; height: 13px; fill: currentColor; }
+  svg.curve { position: absolute; left: 0; top: 0; height: 100%; pointer-events: none; overflow: visible; }
+  svg.curve path { fill: none; stroke: url(#tempGrad); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  svg.curve path.draw { stroke-dasharray: 20000; stroke-dashoffset: 20000; animation: draw 1.6s ease-out forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  svg.curve circle { fill: var(--bg); stroke: var(--text); stroke-width: 2; }
+  svg.curve text { fill: var(--text); font: 500 19px Sora, sans-serif; text-anchor: middle; }
+  .progress { height: 3px; margin: 0 24px; border-radius: 2px; background: rgba(160,190,230,.08); position: relative; }
+  .progress i { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: var(--dim); }
+
+  /* week */
+  .week { display: flex; flex-direction: column; padding-top: 14px; padding-bottom: 10px; }
+  .row { display: grid; grid-template-columns: 74px 44px 1fr 76px 46px minmax(0, 190px) 46px; align-items: center; gap: 12px; }
+  .row.head { height: 26px; }
+  .row.head span { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+  .row.head .r { text-align: right; }
+  .d { flex: 1; font-size: 18px; border-radius: 12px; margin: 0 -10px; padding: 0 10px; cursor: pointer;
+       opacity: 0; transform: translateY(6px); animation: rise .5s ease-out forwards; }
+  .d.sel { background: rgba(242,184,75,.08); box-shadow: inset 3px 0 0 var(--accent); }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  .d img { width: 40px; height: 40px; }
+  .d .what { color: var(--dim); font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .d .rain { font-size: 15px; color: var(--faint); display: flex; align-items: center; gap: 4px; }
+  .d .rain.wet { color: var(--cool); }
+  .d .lo { color: var(--dim); text-align: right; }
+  .bar { position: relative; height: 8px; border-radius: 4px; background: rgba(160,190,230,.08); }
+  .bar i { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: linear-gradient(90deg, var(--cool), var(--accent)); }
+  .err { color: #ff6b6b; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <button class="home" id="home" aria-label="Back to deck">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Deck
+    </button>
+    <div class="place" id="place"></div>
+    <div class="updated" id="updated"></div>
+  </div>
+
+  <section class="panel now" aria-label="Right now">
+    <div class="label">Right now</div>
+    <img id="nowIcon" alt="">
+    <div class="temp" id="nowTemp">--<sup>°</sup></div>
+    <div class="cond" id="nowCond">Loading…</div>
+    <div class="hilo" id="nowHiLo"></div>
+    <div class="tiles">
+      <div class="tile"><div class="label">Feels like</div><b id="tFeels">--</b></div>
+      <div class="tile"><div class="label">Chance of rain</div><b id="tRain">--</b></div>
+      <div class="tile"><div class="label">Humidity</div><b id="tHum">--</b></div>
+      <div class="tile"><div class="label">Wind</div><b id="tWind">--</b></div>
+    </div>
+  </section>
+
+  <section class="panel hours" aria-label="Hour by hour">
+    <div class="head"><div class="label">Hour by hour</div><div class="hint">Swipe for later &rarr;</div></div>
+    <div class="scroll" id="scroll"><div class="track" id="track"></div></div>
+    <div class="progress"><i id="prog"></i></div>
+  </section>
+
+  <section class="panel week" aria-label="Next 7 days">
+    <div class="row head">
+      <span>7 days</span><span></span><span></span><span>Rain</span><span class="r">Low</span><span></span><span>High</span>
+    </div>
+    <div id="week" style="display:contents"></div>
+  </section>
+
+<script>
+  document.getElementById("home").onclick = function () { location.href = "index.html"; };
+
+  // the place comes from settings.json. Hourly runs 7 days from now so you can swipe through the week.
+  var W = (window.DECK && DECK.weather) || { place: "New York", label: "10001", latitude: 40.7506, longitude: -73.9972, units: "us" };
+  var METRIC = W.units === "metric", DEG = METRIC ? "C" : "F", SPEED = METRIC ? "km/h" : "mph";
+  var placeEl = document.getElementById("place"), labelEl = document.createElement("span");
+  placeEl.textContent = W.place || ""; labelEl.textContent = W.label || ""; placeEl.appendChild(labelEl);
+  var API = "https://api.open-meteo.com/v1/forecast?latitude=" + W.latitude + "&longitude=" + W.longitude +
+    "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,relative_humidity_2m,is_day" +
+    "&hourly=temperature_2m,weather_code,precipitation_probability,is_day" +
+    "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
+    (METRIC ? "" : "&temperature_unit=fahrenheit&wind_speed_unit=mph") + "&timezone=auto&forecast_days=7&forecast_hours=168";
+  var CELL = 84, PAD = 24;
+
+  // WMO weather codes -> words and a meteocons icon
+  function look(code, day) {
+    var sky = day ? "-day" : "-night";
+    if (code === 0) return ["Clear", "clear" + sky];
+    if (code <= 2) return [code === 1 ? "Mostly clear" : "Partly cloudy", "partly-cloudy" + sky];
+    if (code === 3) return ["Cloudy", "overcast"];
+    if (code <= 48) return ["Fog", "fog"];
+    if (code <= 57) return ["Drizzle", "drizzle"];
+    if (code === 66 || code === 67) return ["Freezing rain", "sleet"];
+    if (code <= 67 || (code >= 80 && code <= 82)) return [code >= 80 ? "Showers" : "Rain", "rain"];
+    if (code <= 77 || code === 85 || code === 86) return ["Snow", "snow"];
+    return ["Thunderstorms", "thunderstorms"];
+  }
+  function icon(name) { return "https://api.iconify.design/meteocons/" + name + "-fill.svg"; }
+  function r(x) { return Math.round(x); }
+  function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+  var DROP = '<svg class="drop" viewBox="0 0 10 13"><path d="M5 0C5 0 0 6 0 8.5a5 5 0 0 0 10 0C10 6 5 0 5 0z"/></svg>';
+  function rain(p, cls) { return '<span class="rain' + (p >= 30 ? " wet" : "") + (cls ? " " + cls : "") + '">' + DROP + (p == null ? "–" : p + "%") + "</span>"; }
+  function compass(deg) { return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(deg / 45) % 8]; }
+  function clock(d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+
+  var dayStart = {};  // "2026-11-24" -> index of that day's first hour in the strip
+
+  function draw(w, when) {
+    var c = w.current, d = w.daily, h = w.hourly, L = look(c.weather_code, c.is_day);
+    document.getElementById("nowIcon").src = icon(L[1]);
+    document.getElementById("nowTemp").innerHTML = r(c.temperature_2m) + "<sup>°" + DEG + "</sup>";
+    document.getElementById("nowCond").textContent = L[0];
+    document.getElementById("nowHiLo").innerHTML = "High <b>" + r(d.temperature_2m_max[0]) + "°</b> &nbsp;·&nbsp; Low <b>" + r(d.temperature_2m_min[0]) + "°</b>";
+    document.getElementById("tFeels").innerHTML = r(c.apparent_temperature) + "°";
+    document.getElementById("tRain").innerHTML = (d.precipitation_probability_max[0] || 0) + "% <small>today</small>";
+    document.getElementById("tHum").innerHTML = c.relative_humidity_2m + "%";
+    document.getElementById("tWind").innerHTML = r(c.wind_speed_10m) + " <small>" + SPEED + " " + compass(c.wind_direction_10m) + "</small>";
+
+    // hour cells; a new day starts with its name in amber
+    var track = document.getElementById("track"); track.innerHTML = "";
+    dayStart = {};
+    var temps = h.temperature_2m, n = h.time.length;
+    h.time.forEach(function (t, i) {
+      var dt = new Date(t), date = t.slice(0, 10), first = !(date in dayStart);
+      if (first) dayStart[date] = i;
+      var label = i === 0 ? "Now" : dt.getHours() === 0 ? dt.toLocaleDateString([], { weekday: "short" })
+        : dt.toLocaleTimeString([], { hour: "numeric" }).replace(" ", "").toLowerCase();
+      track.appendChild(el("div", "h" + (i && dt.getHours() === 0 ? " day" : ""),
+        '<div class="t">' + label + '</div><img alt="" loading="lazy" src="' + icon(look(h.weather_code[i], h.is_day[i])[1]) + '">' +
+        rain(h.precipitation_probability[i])));
+    });
+
+    // the temperature line runs through the middle of the strip, a number on every hour
+    var lo = Math.min.apply(null, temps), hi = Math.max.apply(null, temps), top = 104, bottom = 178, width = PAD * 2 + n * CELL;
+    function y(v) { return bottom - (v - lo) / Math.max(1, hi - lo) * (bottom - top); }
+    var pts = temps.map(function (v, i) { return [PAD + i * CELL + CELL / 2, y(v)]; });
+    var path = "M" + pts.map(function (p) { return p[0] + "," + p[1].toFixed(1); }).join(" L");
+    var svg = '<svg class="curve" width="' + width + '"><defs>' +
+      '<linearGradient id="tempGrad" gradientUnits="userSpaceOnUse" x1="0" y1="' + bottom + '" x2="0" y2="' + top + '">' +
+      '<stop offset="0" stop-color="#6fd3ff"/><stop offset="1" stop-color="#f2b84b"/></linearGradient></defs>' +
+      '<path class="' + (when ? "" : "draw") + '" d="' + path + '"/>';
+    pts.forEach(function (p, i) { svg += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="4"/><text x="' + p[0] + '" y="' + (p[1] - 12) + '">' + r(temps[i]) + "°</text>"; });
+    track.insertAdjacentHTML("beforeend", svg + "</svg>");
+    track.style.width = width + "px";
+
+    // the week; tap a day to jump the hourly strip to it
+    var wlo = Math.min.apply(null, d.temperature_2m_min), whi = Math.max.apply(null, d.temperature_2m_max), span = Math.max(1, whi - wlo);
+    var week = document.getElementById("week"); week.innerHTML = "";
+    d.time.forEach(function (t, i) {
+      var name = i ? new Date(t + "T12:00").toLocaleDateString([], { weekday: "short" }) : "Today", L = look(d.weather_code[i], 1);
+      var a = (d.temperature_2m_min[i] - wlo) / span * 100, b = (d.temperature_2m_max[i] - wlo) / span * 100;
+      var row = el("div", "row d" + (i === 0 ? " sel" : ""),
+        "<span>" + name + '</span><img alt="" src="' + icon(L[1]) + '"><span class="what">' + L[0] + "</span>" +
+        rain(d.precipitation_probability_max[i]) +
+        '<span class="lo">' + r(d.temperature_2m_min[i]) + '°</span><div class="bar"><i style="left:' + a + "%;right:" + (100 - b) + '%"></i></div>' +
+        "<span>" + r(d.temperature_2m_max[i]) + "°</span>");
+      row.style.animationDelay = (i * 60) + "ms";
+      row.onclick = function () { jump(t); };
+      week.appendChild(row);
+    });
+
+    var up = document.getElementById("updated");
+    up.textContent = when ? "Offline · last updated " + clock(new Date(when)) : "Updated " + clock(new Date());
+    up.className = "updated" + (when ? " off" : "");
+    progress();
+  }
+
+  // jump to 7am on that day (or now, for today)
+  var scroller = document.getElementById("scroll");
+  function jump(date) {
+    var i = dayStart[date]; if (i == null) i = 0;
+    if (i > 0) i += 7;
+    scroller.scrollTo({ left: i * CELL, behavior: "smooth" });
+  }
+  // highlight the day that's in view and move the little bar under the strip
+  function progress() {
+    var max = scroller.scrollWidth - scroller.clientWidth, bar = document.getElementById("prog");
+    var part = scroller.clientWidth / scroller.scrollWidth;
+    bar.style.width = (part * 100) + "%"; bar.style.left = (max ? scroller.scrollLeft / max * (1 - part) * 100 : 0) + "%";
+    var at = Math.floor((scroller.scrollLeft + CELL) / CELL), best = null;
+    Object.keys(dayStart).forEach(function (k) { if (dayStart[k] <= at) best = k; });
+    var rows = document.querySelectorAll(".d");
+    Object.keys(dayStart).forEach(function (k, n) { if (rows[n]) rows[n].classList.toggle("sel", k === best); });
+  }
+  scroller.addEventListener("scroll", progress);
+
+  // keep the last forecast so the page still shows something without internet
+  function load() {
+    fetch(API).then(function (res) { if (!res.ok) throw res; return res.json(); }).then(function (w) {
+      draw(w);
+      try { localStorage.setItem("deckWeather", JSON.stringify({ at: Date.now(), w: w })); } catch (e) {}
+    }).catch(function () {
+      var old; try { old = JSON.parse(localStorage.getItem("deckWeather")); } catch (e) {}
+      if (old) return draw(old.w, old.at);
+      var e = document.getElementById("nowCond"); e.textContent = "Can't load the weather"; e.className = "cond err";
+    });
+  }
+  load();
+  setInterval(load, 15 * 60000);
+
+  // timer and alarm keep running (and ring) on this page too
+  var js = document.createElement("script");
+  js.src = "alarm.js";
+  document.body.appendChild(js);
+
+  // same fit as the deck: designed at 1280x800, shrunk to the Echo's ~853x533
+  function fit() {
+    var s = document.body.style, z = Math.min(innerWidth / 1280, innerHeight / 800);
+    s.zoom = z < 1 ? z : ""; s.width = z < 1 ? "1280px" : ""; s.height = z < 1 ? "800px" : "";
+  }
+  fit(); addEventListener("resize", fit);
+</script>
+</body>
+</html>

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calendar</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;500;650&display=swap" rel="stylesheet">
+<script src="config.js"></script>
+<style>
+  /* A calendar with no sign-in on the Echo: it reads Google Calendar's "secret address in iCal format"
+     (listed under "calendars" in settings.json on the PC, copied here by sync_echo.py) plus US holidays.
+     Read-only: add or change events on your phone or PC and they show up here within 30 minutes. */
+  :root { --bg:#070b12; --card:#0e1520; --line:rgba(160,190,230,.12); --text:#eef2f8; --dim:#7f8aa0; --accent:#f2b84b; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: radial-gradient(ellipse at 50% 50%, #0d1524 0%, var(--bg) 70%);
+    color: var(--text); font-family: "Sora", "Segoe UI", Roboto, sans-serif;
+    display: grid; grid-template-columns: 72px minmax(0, 1fr) minmax(0, 380px);
+    gap: 20px; padding: 26px 28px; overflow: hidden; -webkit-user-select: none; user-select: none;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .home { font-size: 34px; color: var(--dim); border: 1px solid var(--line); background: linear-gradient(170deg,#121b28,var(--card)); border-radius: 18px; }
+  .home:active { border-color: var(--accent); }
+  .panel { border: 1px solid var(--line); border-radius: 24px; background: rgba(14,21,32,.6); padding: 22px 24px; min-height: 0; display: flex; flex-direction: column; }
+  .label { font-size: 13px; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+
+  /* month */
+  .top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .month { font-size: 34px; font-weight: 300; letter-spacing: -.01em; margin-right: auto; }
+  .month b { font-weight: 300; color: var(--dim); }
+  .nav { height: 52px; min-width: 52px; padding: 0 18px; border-radius: 14px; border: 1px solid var(--line); background: #121b28; font-size: 22px; }
+  .nav.today { font-size: 15px; letter-spacing: .12em; text-transform: uppercase; }
+  .nav:active { border-color: var(--accent); }
+  .wk { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 6px; }
+  .wk span { font-size: 12px; letter-spacing: .2em; color: var(--dim); padding-left: 10px; }
+  .grid { flex: 1; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 5px; min-height: 0; }
+  .day { border: 1px solid transparent; border-radius: 12px; background: rgba(160,190,230,.035); padding: 6px 7px; min-width: 0; overflow: hidden; display: flex; flex-direction: column; gap: 3px; text-align: left; }
+  .day .n { font-size: 17px; line-height: 26px; width: 30px; text-align: center; border-radius: 13px; margin-left: -2px; }
+  .day.out { opacity: .35; }
+  .day.today .n { background: var(--accent); color: #1a1205; font-weight: 650; }
+  .day.sel { border-color: rgba(242,184,75,.55); background: rgba(242,184,75,.06); }
+  .chip { font-size: 12px; line-height: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 6px; border-left: 3px solid var(--c); color: #cdd5e2; }
+  .more { font-size: 11px; color: var(--dim); padding-left: 9px; }
+
+  /* agenda for the chosen day onward */
+  .agenda { gap: 0; }
+  .list { flex: 1; overflow-y: auto; margin-top: 12px; padding-right: 4px; }
+  .dh { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin: 16px 0 8px; }
+  .dh:first-child { margin-top: 0; }
+  .dh.now { color: var(--accent); }
+  .ev { display: grid; grid-template-columns: 84px 4px 1fr; gap: 12px; align-items: center; padding: 9px 0; }
+  .ev .t { font-size: 15px; color: var(--dim); text-align: right; }
+  .ev i { align-self: stretch; border-radius: 2px; background: var(--c); }
+  .ev .s { font-size: 19px; line-height: 1.25; }
+  .empty { color: var(--dim); font-size: 17px; margin-top: 6px; }
+  .note { font-size: 13px; color: var(--dim); line-height: 1.45; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 10px; }
+  .note.bad { color: #ff6b6b; }
+</style>
+</head>
+<body>
+  <button class="home" aria-label="Back to deck" onclick="location.href='index.html'">&#8962;</button>
+
+  <section class="panel" aria-label="Month">
+    <div class="top">
+      <div class="month" id="month"></div>
+      <button class="nav today" id="today">Today</button>
+      <button class="nav" id="prev" aria-label="Previous month">&#8249;</button>
+      <button class="nav" id="next" aria-label="Next month">&#8250;</button>
+    </div>
+    <div class="wk"><span>SUN</span><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span></div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section class="panel agenda" aria-label="Events">
+    <div class="label" id="agendaLabel">Coming up</div>
+    <div class="list" id="list"></div>
+    <div class="note" id="note"></div>
+  </section>
+
+<script>
+  var DECK = window.DECK || {};
+  var DAY = 86400000;
+  var FEEDS = [{ url: "https://calendar.google.com/calendar/ical/en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics", c: "#5fd39a" }]
+    .concat((DECK.calendars || []).map(function (u, i) { return { url: u, c: ["#6fa8ff", "#a882ff", "#ff9f6b", "#6fd3ff"][i % 4], mine: true }; }));
+  var EVENTS = [], failed = [];
+
+  // ---------- reading iCal (.ics) ----------
+  var WD = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 }, fmts = {};
+  function tzAhead(t, tz) {  // how far the time zone is ahead of UTC at instant t, in ms
+    var f = fmts[tz] || (fmts[tz] = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }));
+    var p = {}; f.formatToParts(new Date(t)).forEach(function (x) { p[x.type] = +x.value; });
+    return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(t / 1000) * 1000;
+  }
+  function parseDate(v, tz) {
+    var m = /^(\d{4})(\d\d)(\d\d)(?:T(\d\d)(\d\d)(\d\d)(Z)?)?/.exec(v);
+    if (!m) return { d: new Date(NaN) };
+    if (!m[4]) return { d: new Date(+m[1], m[2] - 1, +m[3]), allDay: true };
+    var wall = Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+    if (m[7]) return { d: new Date(wall) };
+    if (tz) try { return { d: new Date(wall - tzAhead(wall - tzAhead(wall, tz), tz)) }; } catch (e) {}  // unknown zone names fall through to local time
+    return { d: new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]) };
+  }
+  function parseICS(text, c) {
+    var out = [], cur = null;
+    text.replace(/\r?\n[ \t]/g, "").split(/\r?\n/).forEach(function (line) {
+      if (line === "BEGIN:VEVENT") cur = { ex: [], skip: {}, c: c };
+      else if (line === "END:VEVENT") { if (cur && cur.start && !isNaN(cur.start) && cur.status !== "CANCELLED") out.push(cur); cur = null; }
+      else if (cur) {
+        var i = line.indexOf(":"); if (i < 0) return;
+        var head = line.slice(0, i).split(";"), val = line.slice(i + 1), tz = (/;TZID="?([^;:"]+)/.exec(line.slice(0, i)) || [])[1];
+        switch (head[0]) {
+          case "SUMMARY": cur.title = val.replace(/\\n/gi, " ").replace(/\\([,;\\])/g, "$1"); break;
+          case "DTSTART": var p = parseDate(val, tz); cur.start = p.d; cur.allDay = p.allDay; break;
+          case "DTEND": cur.end = parseDate(val, tz).d; break;
+          case "RRULE": cur.rule = {}; val.split(";").forEach(function (kv) { kv = kv.split("="); cur.rule[kv[0]] = kv[1]; }); break;
+          case "EXDATE": val.split(",").forEach(function (v) { cur.ex.push(+parseDate(v, tz).d); }); break;
+          case "RECURRENCE-ID": cur.recId = +parseDate(val, tz).d; break;
+          case "UID": cur.uid = val; break;
+          case "STATUS": cur.status = val; break;
+        }
+      }
+    });
+    // a changed single occurrence of a repeating event replaces that occurrence
+    var byUid = {}; out.forEach(function (e) { if (e.rule) byUid[e.uid] = e; });
+    out.forEach(function (e) { if (e.recId && byUid[e.uid]) byUid[e.uid].skip[e.recId] = 1; });
+    return out;
+  }
+
+  // ---------- repeating events ----------
+  // shortcut: covers DAILY/WEEKLY/MONTHLY/YEARLY with INTERVAL, COUNT, UNTIL, BYDAY (incl. "2TU", "-1FR"), BYMONTHDAY, BYMONTH.
+  // BYSETPOS and hourly rules are not handled; repeats keep the first event's clock time in the Echo's time zone.
+  function dayNo(d) { return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY); }
+  function fromDayNo(n, t) { var u = new Date(n * DAY); return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), t.getHours(), t.getMinutes(), t.getSeconds()); }
+  function list(v, f) { return v ? v.split(",").map(f || Number) : null; }
+  function fits(r, s, d, sn, dn) {
+    var iv = +(r.INTERVAL || 1), wd = d.getDay(), dim = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    var byday = list(r.BYDAY, function (x) { var m = /^([+-]?\d+)?([A-Z]{2})$/.exec(x); return { n: +(m[1] || 0), wd: WD[m[2]] }; });
+    var bymd = list(r.BYMONTHDAY), bymo = list(r.BYMONTH);
+    if (bymo && bymo.indexOf(d.getMonth() + 1) < 0) return false;
+    function onDay() { return byday.some(function (b) { return b.wd === wd && (!b.n || (b.n > 0 ? Math.ceil(d.getDate() / 7) === b.n : Math.ceil((dim - d.getDate() + 1) / 7) === -b.n)); }); }
+    function onDate(def) { return (bymd || [def]).some(function (m) { return d.getDate() === (m > 0 ? m : dim + m + 1); }); }
+    var months = (d.getFullYear() - s.getFullYear()) * 12 + d.getMonth() - s.getMonth();
+    switch (r.FREQ) {
+      case "DAILY": return (dn - sn) % iv === 0 && (!byday || onDay());
+      case "WEEKLY":
+        var ws = WD[r.WKST || "MO"], w0 = sn - (s.getDay() - ws + 7) % 7, w1 = dn - (wd - ws + 7) % 7;
+        return ((w1 - w0) / 7) % iv === 0 && (byday ? onDay() : wd === s.getDay());
+      case "MONTHLY": return months % iv === 0 && (byday ? onDay() && (!bymd || onDate()) : onDate(s.getDate()));
+      case "YEARLY":
+        if ((d.getFullYear() - s.getFullYear()) % iv || (!bymo && d.getMonth() !== s.getMonth())) return false;
+        return byday ? onDay() : onDate(s.getDate());
+    }
+    return false;
+  }
+  // every occurrence of an event that overlaps [from, to)
+  function occurrences(e, from, to) {
+    var len = e.end ? e.end - e.start : (e.allDay ? DAY : 0), out = [];
+    function add(s) { if (+s < +to && +s + Math.max(len, 1) > +from) out.push({ s: s, e: new Date(+s + len), ev: e }); }
+    if (!e.rule) { add(e.start); return out; }
+    var r = e.rule, sn = dayNo(e.start), max = r.COUNT ? +r.COUNT : Infinity, count = 0;
+    var until = r.UNTIL ? parseDate(r.UNTIL).d : null; if (until && r.UNTIL.length === 8) until = new Date(+until + DAY - 1);
+    var n = r.COUNT ? sn : Math.max(sn, dayNo(from) - Math.ceil(len / DAY) - 1);  // with COUNT we must count from the first one
+    for (var end = dayNo(to); n <= end && count < max; n++) {
+      var d = fromDayNo(n, e.start);
+      if (until && d > until) break;
+      if (!fits(r, e.start, d, sn, n)) continue;
+      count++;
+      if (e.ex.indexOf(+d) < 0 && !e.skip[+d]) add(d);
+    }
+    return out;
+  }
+  function between(from, to) {
+    var all = [];
+    EVENTS.forEach(function (e) { all = all.concat(occurrences(e, from, to)); });
+    return all.sort(function (a, b) { return (b.ev.allDay ? 1 : 0) - (a.ev.allDay ? 1 : 0) || a.s - b.s; });
+  }
+  function onDay(occ, day) {  // occurrences touching this local day
+    var a = +day, b = +new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+    return occ.filter(function (o) { return +o.s < b && (+o.e > a || (+o.s >= a && +o.e === +o.s)); });
+  }
+
+  // ---------- drawing ----------
+  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var view = new Date(today.getFullYear(), today.getMonth(), 1), sel = new Date(today);
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function same(a, b) { return +a === +b; }
+  function time(d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); }
+
+  function draw() {
+    today = new Date(); today.setHours(0, 0, 0, 0);
+    document.getElementById("month").innerHTML = view.toLocaleDateString([], { month: "long" }) + " <b>" + view.getFullYear() + "</b>";
+    var first = new Date(view.getFullYear(), view.getMonth(), 1 - view.getDay());
+    var weeks = Math.ceil((view.getDay() + new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate()) / 7);
+    var last = new Date(first.getFullYear(), first.getMonth(), first.getDate() + weeks * 7);
+    var occ = between(first, last), grid = document.getElementById("grid");
+    grid.innerHTML = "";
+    for (var i = 0; i < weeks * 7; i++) {
+      var d = new Date(first.getFullYear(), first.getMonth(), first.getDate() + i), mine = onDay(occ, d);
+      var cell = el("button", "day" + (d.getMonth() !== view.getMonth() ? " out" : "") + (same(d, today) ? " today" : "") + (same(d, sel) ? " sel" : ""));
+      cell.appendChild(el("span", "n", d.getDate()));
+      var room = weeks > 5 ? 2 : 3;
+      mine.slice(0, mine.length > room ? room - 1 : room).forEach(function (o) { var c = el("div", "chip", o.ev.title || "(busy)"); c.style.setProperty("--c", o.ev.c); cell.appendChild(c); });
+      if (mine.length > room) cell.appendChild(el("div", "more", "+" + (mine.length - room + 1) + " more"));
+      cell.onclick = (function (day) { return function () { sel = day; if (day.getMonth() !== view.getMonth()) view = new Date(day.getFullYear(), day.getMonth(), 1); draw(); }; })(d);
+      grid.appendChild(cell);
+    }
+    drawAgenda();
+  }
+
+  function drawAgenda() {
+    var to = new Date(sel.getFullYear(), sel.getMonth(), sel.getDate() + 14), occ = between(sel, to), box = document.getElementById("list");
+    document.getElementById("agendaLabel").textContent = same(sel, today) ? "Coming up" : "From " + sel.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+    box.innerHTML = "";
+    for (var i = 0; i < 14; i++) {
+      var d = new Date(sel.getFullYear(), sel.getMonth(), sel.getDate() + i), mine = onDay(occ, d);
+      if (!mine.length && i) continue;
+      var diff = Math.round((d - today) / DAY);
+      var name = diff === 0 ? "Today" : diff === 1 ? "Tomorrow" : d.toLocaleDateString([], { weekday: "long" });
+      box.appendChild(el("div", "dh" + (diff === 0 ? " now" : ""), name + " · " + d.toLocaleDateString([], { month: "short", day: "numeric" })));
+      if (!mine.length) box.appendChild(el("div", "empty", "Nothing planned"));
+      mine.forEach(function (o) {
+        var row = el("div", "ev"); row.style.setProperty("--c", o.ev.c);
+        row.appendChild(el("span", "t", o.ev.allDay || o.s < d ? "All day" : time(o.s)));
+        row.appendChild(el("i"));
+        row.appendChild(el("span", "s", o.ev.title || "(busy)"));
+        box.appendChild(row);
+      });
+    }
+    if (box.children.length <= 2 && !box.querySelector(".ev")) box.appendChild(el("div", "empty", "Nothing in the next two weeks."));
+    var note = document.getElementById("note");
+    note.className = "note" + (failed.length ? " bad" : "");
+    note.textContent = failed.length ? "Couldn't update " + failed.join(" and ") + ". Showing the last copy."
+      : FEEDS.some(function (f) { return f.mine; }) ? "Your Google Calendar and US holidays. Updates every 30 minutes."
+      : "Showing US holidays. To show your own Google Calendar here, add its secret iCal address to settings.json on your PC (see the README).";
+  }
+
+  // ---------- loading (kept in localStorage, so the last copy shows even without internet) ----------
+  function rebuild() {
+    EVENTS = [];
+    FEEDS.forEach(function (f, i) { var t = localStorage.getItem("deckCal" + i); if (t) EVENTS = EVENTS.concat(parseICS(t, f.c)); });
+    draw();
+  }
+  function load() {
+    failed = [];
+    var left = FEEDS.length;
+    FEEDS.forEach(function (f, i) {
+      fetch(f.url).then(function (r) { if (!r.ok) throw r; return r.text(); })
+        .then(function (t) { if (t.indexOf("BEGIN:VCALENDAR") < 0) throw t; localStorage.setItem("deckCal" + i, t); })
+        .catch(function () { failed.push(f.mine ? "your calendar" : "holidays"); })
+        .then(function () { if (!--left) rebuild(); });
+    });
+  }
+  document.getElementById("prev").onclick = function () { view = new Date(view.getFullYear(), view.getMonth() - 1, 1); draw(); };
+  document.getElementById("next").onclick = function () { view = new Date(view.getFullYear(), view.getMonth() + 1, 1); draw(); };
+  document.getElementById("today").onclick = function () { sel = new Date(today); view = new Date(today.getFullYear(), today.getMonth(), 1); draw(); };
+  rebuild(); load();
+  setInterval(load, 30 * 60000);
+
+  // timer and alarm keep running (and ring) on this page too
+  var js = document.createElement("script"); js.src = "alarm.js"; document.body.appendChild(js);
+
+  // same fit as the deck: designed at 1280x800, shrunk to the Echo's ~853x533
+  function fit() {
+    var s = document.body.style, z = Math.min(innerWidth / 1280, innerHeight / 800);
+    s.zoom = z < 1 ? z : ""; s.width = z < 1 ? "1280px" : ""; s.height = z < 1 ? "800px" : "";
+  }
+  fit(); addEventListener("resize", fit);
+</script>
+</body>
+</html>
