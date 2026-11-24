@@ -23,7 +23,7 @@ import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 HERE = Path(__file__).parent
 PORT = 8765
@@ -102,6 +102,39 @@ NP_PROC = None  # the running nowplaying.ps1; the deck's skip keys and progress 
 ART = HERE / "nowplaying-art.bin"
 
 
+# Covers for songs Windows gives no picture for (Spotify read from its window title), found with Apple's free
+# iTunes search. Only the artist and song name are sent. Kept in memory: {"artist|song": (number, image or None)}.
+COVERS = {}
+COVER_NO = iter(range(1000, 10**9))  # cover numbers from 1000 never clash with nowplaying.ps1's
+
+
+def find_cover(artist, title):
+    """The cover's number for the deck (0 = none yet). The search runs in the background, once per song."""
+    key = f"{artist}|{title}"
+    if key not in COVERS:
+        COVERS[key] = (0, None)
+        threading.Thread(target=fetch_cover, args=(key, artist, title), daemon=True).start()
+    return COVERS[key][0]
+
+
+def fetch_cover(key, artist, title):
+    try:
+        query = urlencode({"term": f"{artist} {title}", "entity": "song", "limit": 5})
+        with urllib.request.urlopen("https://itunes.apple.com/search?" + query, timeout=10) as r:
+            results = json.load(r).get("results", [])
+        # prefer a result by the same artist (searches also find covers and tributes)
+        first = artist.split(",")[0].strip().lower()
+        pick = next((x for x in results if first and first in x.get("artistName", "").lower()), results[0] if results else None)
+        if pick and pick.get("artworkUrl100"):
+            with urllib.request.urlopen(pick["artworkUrl100"].replace("100x100bb", "600x600bb"), timeout=10) as r:
+                COVERS[key] = (next(COVER_NO), r.read())
+    except Exception as e:
+        print(f"No cover found: {type(e).__name__}")
+    if len(COVERS) > 200:  # forget old songs
+        for k in list(COVERS)[:100]:
+            COVERS.pop(k, None)
+
+
 def now_playing_loop():
     global NOW, NP_PROC
     while True:
@@ -110,9 +143,12 @@ def now_playing_loop():
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8", creationflags=subprocess.CREATE_NO_WINDOW)
             for line in p.stdout:
                 try:
-                    NOW = json.loads(line)  # swapped whole, so a request never sees half of it
+                    now = json.loads(line)
                 except ValueError:
-                    pass
+                    continue
+                if now.get("keys"):  # Spotify read from its window title: Windows gives no cover, so look one up
+                    now["art"] = find_cover(now.get("artist", ""), now.get("title", ""))
+                NOW = now  # swapped whole, so a request never sees half of it
             print("Now playing reader stopped; restarting it")
         except Exception as e:
             print(f"Now playing not available: {type(e).__name__}")
@@ -152,8 +188,9 @@ class Deck(BaseHTTPRequestHandler):
         if url.path == "/nowplaying":
             return self._send(200, json.dumps(NOW).encode(), "application/json")
         if url.path == "/art":
+            cover = COVERS.get(f"{NOW.get('artist', '')}|{NOW.get('title', '')}") if NOW.get("keys") else None
             try:
-                img = ART.read_bytes()
+                img = cover[1] if cover and cover[1] else ART.read_bytes()
             except OSError:
                 return self._send(404, b"No picture")
             return self._send(200, img, "image/png" if img[:4] == b"\x89PNG" else "image/jpeg")
