@@ -175,6 +175,7 @@ def keep_in_front(hwnd, was_front):
 # themselves with POST /ping/<pad id> (for example from a Claude Code hook).
 PINGS = {}  # pad id -> when it pinged
 PING_LOCK = threading.Lock()
+PING_INPUT = {}  # pad id -> the last key/click time when it pinged
 
 
 def ping_exe(hwnd, on):
@@ -655,7 +656,12 @@ class Deck(BaseHTTPRequestHandler):
             f = DATA / "usage-history.json"
             return self._send(200, f.read_bytes() if f.exists() else b"[]", "application/json")
         if url.path == "/nowplaying":
-            pings = [p for p, t in list(PINGS.items()) if time.time() - t < 6 * 3600]  # a ping fades after 6 hours unseen
+            with PING_LOCK:
+                # seen: that app is in front and you've typed or clicked at least 3 s after the ping
+                fg = _exe_of(_u32.GetForegroundWindow())
+                for p in [p for p in PINGS if WINDOWS.get(p) == fg and last_input() - PING_INPUT.get(p, 0) > 3000]:
+                    PINGS.pop(p, None)
+                pings = [p for p, t in PINGS.items() if time.time() - t < 6 * 3600]  # a ping fades after 6 hours unseen
             return self._send(200, json.dumps({**NOW, "pings": pings}).encode(), "application/json")
         if url.path == "/art":
             v = parse_qs(url.query).get("v", [""])[0]
@@ -709,8 +715,9 @@ class Deck(BaseHTTPRequestHandler):
             with PING_LOCK:  # checked and set in one step, so opening the app at that moment can't be undone
                 if parse_qs(url.query).get("clear"):
                     PINGS.pop(pad, None)
-                elif not (WINDOWS.get(pad) and _exe_of(_u32.GetForegroundWindow()) == WINDOWS[pad]):  # you're already looking at it
+                else:  # always kept: one app (Claude) holds many chats, so "it's in front" doesn't mean you saw this one
                     PINGS[pad] = time.time()
+                    PING_INPUT[pad] = last_input()
             return self._send(204)
         target = ACTIONS.get(url.path.removeprefix("/run/"))
         if target is None:

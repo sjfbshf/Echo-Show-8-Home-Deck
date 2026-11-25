@@ -119,7 +119,7 @@ Pads already ping when their app flashes its taskbar button. For exact "done" an
 - **Codex:** `notify` in `~/.codex/config.toml` takes one command. To keep the one that's already there, put
   `"pythonw", "C:/path/to/ping_deck.py", "chatgpt", "--"` in front of it. The script runs the original first, then pings.
 
-A ping is skipped when that app is already in front of you.
+A ping clears when you switch to that app or tap its pad. If the app was already in front (one Claude app holds many chats), it clears once you type or click in it.
 
 ### "Alexa, open sesame" (Echo only, optional)
 
