@@ -313,6 +313,9 @@ def refresh_usage():
            "limits": [{k: x.get(k) for k in ("kind", "group", "scope", "percent", "severity", "resets_at", "is_active")} for x in u.get("limits") or []],
            "breakdown": [{k: x.get(k) for k in ("key", "display_name", "percent", "percent_of_limit")} for x in (u.get("seven_day_breakdown") or {}).get("rows") or []],
            "credits": {k: extra.get(k) for k in ("is_enabled", "used_credits", "monthly_limit", "currency", "decimal_places", "spend_limit_reached")} if extra else None}
+    spend = u.get("spend") or {}
+    if out["credits"] is not None:  # a prepaid balance, a spending cap and auto-reload, when the account has them
+        out["credits"].update(balance=spend.get("balance"), cap=spend.get("cap"), auto_reload=spend.get("auto_reload"))
     # history for the 7-day chart: one point per update, kept for 8 days
     hist_file = DATA / "usage-history.json"
     try:

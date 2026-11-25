@@ -196,6 +196,10 @@
     var row = box.appendChild(el("div", "credits"));
     row.appendChild(el("div", "big", money(c.used_credits || 0)));
     row.appendChild(el("span", "", c.monthly_limit ? "used of " + money(c.monthly_limit) + " this month" : "used · no monthly cap"));
+    // a remaining balance only exists on prepaid accounts; otherwise credits are charged as they're used
+    var bal = c.balance && typeof c.balance === "object" ? c.balance.amount_minor : c.balance;
+    box.appendChild(el("div", "note", bal != null ? money(+bal) + " left" + (c.auto_reload ? " · tops up automatically" : "")
+      : "No prepaid balance: credits are charged as you use them."));
     box.appendChild(el("div", "note", c.spend_limit_reached ? "You've reached your credit limit." :
       c.is_enabled ? "On: when you hit a plan limit, Claude keeps going on credits." : "Off: Claude stops at your plan limits."));
   }
@@ -269,7 +273,9 @@
     get("/usagehistory").then(drawChart, function () { drawChart([]); });
   }
   function show(u, old) {
-    $("side").textContent = (old ? "PC not reached · " : "") + "Updated " + new Date(u.updated).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    // the PC checks with Anthropic every 5 minutes; this screen asks the PC again at the same pace
+    var upd = new Date(u.updated), next = new Date(+upd + 5 * 60000), t = function (d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+    $("side").textContent = (old ? "PC not reached · " : "") + "Updated " + t(upd) + (old ? "" : " · next check about " + t(next));
     drawNow(u); drawLimits(u); drawCredits(u); drawSplit(u);
   }
   load(); setInterval(load, 5 * 60000);
