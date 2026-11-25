@@ -10,6 +10,8 @@ The deck key is read from %USERPROFILE%\\.homedeck\\.deck-key, so it never has t
 import os
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -26,6 +28,14 @@ if pad == "auto":
     pad = "terminal" if os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "cli" else "claude"
 try:
     key = (Path.home() / ".homedeck" / ".deck-key").read_text().strip()
-    urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:8765/ping/{pad}?k={key}", method="POST"), timeout=2)
-except Exception:
-    pass  # helper not running: nothing to ping, and a hook must never get in the app's way
+except OSError:
+    sys.exit()  # no deck set up here
+for attempt in range(2):  # one retry, in case the helper is mid-restart (hooks allow 5 s in all)
+    try:
+        urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:8765/ping/{pad}?k={key}", method="POST"), timeout=1.5)
+        break
+    except urllib.error.HTTPError:
+        break  # the helper answered (wrong key or unknown pad): retrying won't change that
+    except Exception:
+        if attempt == 0:
+            time.sleep(1)  # helper not reachable; after the retry, give up quietly so the app is never held up

@@ -61,6 +61,7 @@
   .pad.ping::after { content: ""; position: absolute; top: 16px; right: 16px; width: 18px; height: 18px; border-radius: 50%;
                      background: var(--c); box-shadow: 0 0 0 3px #0e1520; }
   .pad.ping { border-color: color-mix(in srgb, var(--c) 55%, transparent); }
+  .offline .pad.ping::before { animation: none; opacity: 0; }
   @keyframes ping { from { transform: scale(1); opacity: .7; } to { transform: scale(2.8); opacity: 0; } }
   .pad {
     position: relative;
@@ -350,7 +351,11 @@
           el = makePad(p, document.createElement("button"), i + 4 * s);
           el.type = "button";
           el.dataset.pad = p.id;
-          el.addEventListener("click", function () { el.classList.remove("ping"); pc("/run/" + encodeURIComponent(p.id)).then(function () { say("Opened on your PC", "ok"); }, function () {}); });
+          el.addEventListener("click", function () {
+            var had = el.classList.contains("ping");
+            el.classList.remove("ping");
+            pc("/run/" + encodeURIComponent(p.id)).then(function () { say("Opened on your PC", "ok"); }, function () { if (had) el.classList.add("ping"); });
+          });
         } else {
           el = makePad(p, document.createElement("a"), i + 4 * s);
           el.href = p.url;  // same tab; local pages like timer.html sit next to this file
@@ -443,8 +448,8 @@
     var stop = new AbortController(); setTimeout(function () { stop.abort(); }, 2500);
     fetch(DECK.pc + "/nowplaying?k=" + encodeURIComponent(DECK.key), { signal: stop.signal })
       .then(function (r) { if (!r.ok) throw r; return r.json(); })
-      .then(function (n) { NP = n; npAt = Date.now(); npMisses = 0; drawNow(); drawPings(n.pings || []); })
-      .catch(function () { if (++npMisses >= 3) { NP = null; drawNow(); drawPings([]); } })  // PC off or asleep: "Nothing playing"
+      .then(function (n) { NP = n; npAt = Date.now(); npMisses = 0; drawNow(); drawPings(n.pings || []); document.body.classList.remove("offline"); })
+      .catch(function () { if (++npMisses >= 3) { NP = null; drawNow(); document.body.classList.add("offline"); } })  // PC off or asleep: "Nothing playing"
       .then(function () { npBusy = false; });
   }
   // skip and jump: sent to the PC helper, which passes them to Windows' media controls

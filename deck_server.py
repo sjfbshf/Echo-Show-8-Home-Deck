@@ -15,6 +15,7 @@ import re
 import secrets
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -173,20 +174,92 @@ def keep_in_front(hwnd, was_front):
 # Pings: when a PC pad's app wants you (it flashes its taskbar button, the way Windows apps say "done" or "your turn"),
 # its pad on the deck shows a small silent animation until you open that app. Apps or scripts can also ping a pad
 # themselves with POST /ping/<pad id> (for example from a Claude Code hook).
-PINGS = {}  # pad id -> when it pinged
+# A ping counts as seen when you open that app from the deck, switch to it, or press a key or click in it 3 s or more
+# after the ping arrived (one app, like Claude, holds many chats, so "it's in front" alone isn't enough).
+PINGS = {}  # pad id -> {"at": time.monotonic() when it pinged}
 PING_LOCK = threading.Lock()
-PING_INPUT = {}  # pad id -> the last key/click time when it pinged
+CLEARED = {}  # pad id -> time.monotonic() its ping was last cleared
+PING_LIFE = 6 * 3600  # a ping fades after 6 hours unseen
+HOOK = {"hwnd": None}  # the hidden window that hears Windows' messages
+
+
+def _listen():
+    """Tell the hidden window the pings changed: it listens for keys and clicks only while a ping waits."""
+    if HOOK["hwnd"]:
+        _u32.PostMessageW(HOOK["hwnd"], 0x8001, 0, 0)
+
+
+def set_ping(pad):  # call with PING_LOCK held
+    PINGS[pad] = {"at": time.monotonic()}
+    _listen()
+
+
+def clear_ping(pad, rec=None):  # call with PING_LOCK held; with rec, only if that same ping is still the current one
+    if pad in PINGS and (rec is None or PINGS[pad] is rec):
+        del PINGS[pad]
+        CLEARED[pad] = time.monotonic()
+        _listen()
+
+
+def live_pings():  # call with PING_LOCK held
+    now = time.monotonic()
+    for p in [p for p, r in PINGS.items() if now - r["at"] > PING_LIFE]:
+        clear_ping(p)
+    return list(PINGS)
 
 
 def ping_exe(hwnd, on):
     exe = _exe_of(hwnd)
+    now = time.monotonic()
     with PING_LOCK:
         for pad, want in WINDOWS.items():
-            if want == exe:
-                if on:
-                    PINGS[pad] = time.time()
-                else:
-                    PINGS.pop(pad, None)
+            if want != exe:
+                continue
+            # Windows' messages can arrive a moment late: a flash from just before a clear, or a switch from just
+            # before a ping, is old news and mustn't undo the newer state
+            if on and now - CLEARED.get(pad, float("-inf")) > 1:
+                set_ping(pad)
+            elif not on and pad in PINGS and now - PINGS[pad]["at"] > 1:
+                clear_ping(pad)
+
+
+class _RawDevice(ctypes.Structure):
+    _fields_ = [("usUsagePage", _wt.USHORT), ("usUsage", _wt.USHORT), ("dwFlags", _wt.DWORD), ("hwndTarget", _wt.HWND)]
+
+
+class _RawHeader(ctypes.Structure):
+    _fields_ = [("dwType", _wt.DWORD), ("dwSize", _wt.DWORD), ("hDevice", _wt.HANDLE), ("wParam", _wt.WPARAM)]
+
+
+_u32.GetRawInputData.argtypes = [_wt.HANDLE, _wt.UINT, ctypes.c_void_p, ctypes.POINTER(_wt.UINT), _wt.UINT]
+_u32.GetRawInputData.restype = _wt.UINT
+_u32.RegisterRawInputDevices.argtypes = [ctypes.c_void_p, _wt.UINT, _wt.UINT]
+_u32.PostMessageW.argtypes = [_wt.HWND, _wt.UINT, _wt.WPARAM, _wt.LPARAM]
+_RAW_BUF = ctypes.create_string_buffer(64)
+
+
+def real_press(handle):
+    """Was this raw input a person pressing a key or a mouse button? Never reads which key: only that one went down.
+    Mouse moves and the wheel don't count, and nor does input a program made up (like this helper's own key press)."""
+    size = _wt.UINT(len(_RAW_BUF))
+    if _u32.GetRawInputData(handle, 0x10000003, _RAW_BUF, ctypes.byref(size), ctypes.sizeof(_RawHeader)) in (0, 0xFFFFFFFF):
+        return False
+    head = _RawHeader.from_buffer(_RAW_BUF)
+    if not head.hDevice:  # no device behind it: made by software (keybd_event, SendInput)
+        return False
+    at = ctypes.sizeof(_RawHeader)
+    if head.dwType == 0:  # mouse: usButtonFlags, any button going down
+        return bool(struct.unpack_from("<H", _RAW_BUF, at + 4)[0] & 0x155)
+    return head.dwType == 1 and not struct.unpack_from("<H", _RAW_BUF, at + 2)[0] & 1  # keyboard: Flags, key down
+
+
+def seen_input():
+    if not PINGS:
+        return
+    fg, now = _exe_of(_u32.GetForegroundWindow()), time.monotonic()
+    with PING_LOCK:
+        for p in [p for p, r in PINGS.items() if WINDOWS.get(p) == fg and now - r["at"] >= 3]:
+            clear_ping(p)
 
 
 def shell_hook_loop():
@@ -208,8 +281,25 @@ def shell_hook_loop():
     _u32.UnregisterClassW.argtypes = [_wt.LPCWSTR, _wt.HINSTANCE]
     shell_msg = _u32.RegisterWindowMessageW("SHELLHOOK")
 
+    _u32.RegisterRawInputDevices.restype = _wt.BOOL
+    listening = [False]
+
+    def listen(hwnd):
+        want = bool(PINGS)
+        if want != listening[0]:  # RIDEV_INPUTSINK: hear it while in the background; RIDEV_REMOVE: stop
+            flags, target = (0x100, hwnd) if want else (0x1, None)
+            dev = (_RawDevice * 2)(_RawDevice(1, 2, flags, target), _RawDevice(1, 6, flags, target))  # mouse, keyboard
+            if _u32.RegisterRawInputDevices(dev, 2, ctypes.sizeof(_RawDevice)):
+                listening[0] = want
+
     def proc(hwnd, msg, wparam, lparam):
-        if msg == shell_msg:
+        if msg == 0x8001:  # pings changed
+            listen(hwnd)
+            return 0
+        if msg == 0x00FF:  # WM_INPUT: a key or the mouse, somewhere
+            if real_press(lparam):
+                seen_input()
+        elif msg == shell_msg:
             code = wparam & 0xFFFF
             if code == 0x8006:          # HSHELL_FLASH: an app's taskbar button is flashing
                 ping_exe(lparam, True)
@@ -228,10 +318,15 @@ def shell_hook_loop():
         if not hooked:
             print("Pings from apps not available (couldn't listen to the taskbar)")
             return
+        HOOK["hwnd"] = hwnd
+        listen(hwnd)  # a ping may have come in before this window existed
         msg = _wt.MSG()
         while _u32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             _u32.TranslateMessage(ctypes.byref(msg)); _u32.DispatchMessageW(ctypes.byref(msg))
     finally:  # undo it all while `keep` still exists, so nothing can call into a freed callback
+        HOOK["hwnd"] = None
+        if listening[0]:
+            _u32.RegisterRawInputDevices((_RawDevice * 2)(_RawDevice(1, 2, 1, None), _RawDevice(1, 6, 1, None)), 2, ctypes.sizeof(_RawDevice))
         if hooked:
             _u32.DeregisterShellHookWindow(hwnd)
         if hwnd:
@@ -632,6 +727,8 @@ class Deck(BaseHTTPRequestHandler):
     def log_request(self, code="-", size="-"):
         if code == 200 and self.path.startswith(("/nowplaying", "/art")):
             return  # asked every second; logging them would fill deck.log
+        if code == 204 and self.path.startswith("/ping/"):
+            return  # which app pinged and when is nobody's business, not even the log's
         self.log_message('"%s" %s %s', self.requestline, code, size)
 
     def log_message(self, fmt, *args):
@@ -657,11 +754,7 @@ class Deck(BaseHTTPRequestHandler):
             return self._send(200, f.read_bytes() if f.exists() else b"[]", "application/json")
         if url.path == "/nowplaying":
             with PING_LOCK:
-                # seen: that app is in front and you've typed or clicked at least 3 s after the ping
-                fg = _exe_of(_u32.GetForegroundWindow())
-                for p in [p for p in PINGS if WINDOWS.get(p) == fg and last_input() - PING_INPUT.get(p, 0) > 3000]:
-                    PINGS.pop(p, None)
-                pings = [p for p, t in PINGS.items() if time.time() - t < 6 * 3600]  # a ping fades after 6 hours unseen
+                pings = live_pings()
             return self._send(200, json.dumps({**NOW, "pings": pings}).encode(), "application/json")
         if url.path == "/art":
             v = parse_qs(url.query).get("v", [""])[0]
@@ -714,18 +807,21 @@ class Deck(BaseHTTPRequestHandler):
                 return self._send(404, b"Unknown pad")
             with PING_LOCK:  # checked and set in one step, so opening the app at that moment can't be undone
                 if parse_qs(url.query).get("clear"):
-                    PINGS.pop(pad, None)
+                    clear_ping(pad)
                 else:  # always kept: one app (Claude) holds many chats, so "it's in front" doesn't mean you saw this one
-                    PINGS[pad] = time.time()
-                    PING_INPUT[pad] = last_input()
+                    set_ping(pad)
             return self._send(204)
-        target = ACTIONS.get(url.path.removeprefix("/run/"))
+        pad = url.path.removeprefix("/run/")
+        target = ACTIONS.get(pad)
         if target is None:
             return self._send(404, b"Unknown pad")
-        if not start_pad(url.path.removeprefix("/run/"), target):
+        with PING_LOCK:
+            rec = PINGS.get(pad)  # the ping you saw when you tapped
+        if not start_pad(pad, target):
             return self._send(502, b"Couldn't open it")  # the deck then says so, instead of "Opened" (and the ping stays)
         with PING_LOCK:
-            PINGS.pop(url.path.removeprefix("/run/"), None)  # opening the app from the deck counts as seeing it
+            if rec:
+                clear_ping(pad, rec)  # opening the app counts as seeing that ping; a newer one that came meanwhile stays
         self._send(204)
 
 
