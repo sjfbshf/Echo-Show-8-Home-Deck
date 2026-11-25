@@ -54,7 +54,16 @@
   .tray.echo { justify-self: start; }
   .tray.pc { justify-self: end; }
 
+  /* a ping: the app on the PC wants you (an answer is ready, or it's your turn). A dot in the pad's own colour, with a
+     ring that keeps widening and fading. Silent, and gone once you open that app. */
+  .pad.ping::before { content: ""; position: absolute; top: 16px; right: 16px; width: 18px; height: 18px; border-radius: 50%;
+                      background: var(--c); opacity: .7; animation: ping 1.8s ease-out infinite; will-change: transform, opacity; }
+  .pad.ping::after { content: ""; position: absolute; top: 16px; right: 16px; width: 18px; height: 18px; border-radius: 50%;
+                     background: var(--c); box-shadow: 0 0 0 3px #0e1520; }
+  .pad.ping { border-color: color-mix(in srgb, var(--c) 55%, transparent); }
+  @keyframes ping { from { transform: scale(1); opacity: .7; } to { transform: scale(2.8); opacity: 0; } }
   .pad {
+    position: relative;
     display: flex; align-items: center; justify-content: center;
     border-radius: 24px;
     background: linear-gradient(170deg, #142031, var(--card));
@@ -209,7 +218,9 @@
   .status.bad { color: var(--bad); border-color: rgba(255,107,107,.35); background: rgba(255,107,107,.08); }
 
   /* Claude usage, standing in the gap between the trays: two meters, each with its percent and when it resets */
+  .usage:active { transform: translateX(-50%) scale(.985); border-color: rgba(217,119,87,.5); }  /* tap: the full usage screen */
   .usage {
+    cursor: pointer; transition: transform .15s ease, border-color .2s ease;
     position: absolute; top: 53px; left: 50%; transform: translateX(-50%); width: 272px; height: 450px;
     display: flex; flex-direction: column; gap: 16px; padding: 24px 22px;
     border-radius: 28px; border: 1px solid var(--line);
@@ -338,7 +349,8 @@
         if (p.pc) {
           el = makePad(p, document.createElement("button"), i + 4 * s);
           el.type = "button";
-          el.addEventListener("click", function () { pc("/run/" + encodeURIComponent(p.id)).then(function () { say("Opened on your PC", "ok"); }, function () {}); });
+          el.dataset.pad = p.id;
+          el.addEventListener("click", function () { el.classList.remove("ping"); pc("/run/" + encodeURIComponent(p.id)).then(function () { say("Opened on your PC", "ok"); }, function () {}); });
         } else {
           el = makePad(p, document.createElement("a"), i + 4 * s);
           el.href = p.url;  // same tab; local pages like timer.html sit next to this file
@@ -431,7 +443,7 @@
     var stop = new AbortController(); setTimeout(function () { stop.abort(); }, 2500);
     fetch(DECK.pc + "/nowplaying?k=" + encodeURIComponent(DECK.key), { signal: stop.signal })
       .then(function (r) { if (!r.ok) throw r; return r.json(); })
-      .then(function (n) { NP = n; npAt = Date.now(); npMisses = 0; drawNow(); })
+      .then(function (n) { NP = n; npAt = Date.now(); npMisses = 0; drawNow(); drawPings(n.pings || []); })
       .catch(function () { if (++npMisses >= 3) { NP = null; drawNow(); } })  // PC off or asleep: "Nothing playing"
       .then(function () { npBusy = false; });
   }
@@ -507,6 +519,12 @@
   hud.addEventListener("click", function (e) { if (e.target === hud || e.target === document.getElementById("hudBg")) closeHud(); });
   loadNow(); setInterval(loadNow, 1000); setInterval(drawNow, 250);
 
+  // pings ride along with the now-playing answer: pads whose app wants you get a pulsing dot
+  function drawPings(list) {
+    each(".pad[data-pad]", function (el) { el.classList.toggle("ping", list.indexOf(el.dataset.pad) >= 0); });
+  }
+  // tapping the usage panel opens the in-depth usage screen
+  document.querySelector(".usage").addEventListener("click", function () { location.href = "usage.html"; });
   // tapping the time opens the cozy full-screen clock
   document.querySelector(".panel.clock").addEventListener("click", function () { location.href = "clock.html"; });
 

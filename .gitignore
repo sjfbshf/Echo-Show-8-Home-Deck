@@ -9,6 +9,7 @@ deck.log
 deck.log.1
 usage.json
 usage.json.tmp
+usage-history.json
 config.js
 pads.js
 __pycache__/

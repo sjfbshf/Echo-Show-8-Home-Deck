@@ -5,8 +5,8 @@ Turn an Echo Show 8 (or any Android tablet) into a touch control desk for your h
 ![The deck](docs/deck.png)
 
 - **Top left: apps on the screen itself.** Weather, a timer and alarm (flick-to-pick time wheels), a calendar where you can add events with reminders, and Google. These work even when your PC is off.
-- **Top right: apps on your PC.** One tap opens Claude, ChatGPT, Terminal, Obsidian, or anything else you list.
-- **Middle: Claude usage.** Your 5-hour and weekly Claude plan usage, and when each one resets. This is optional.
+- **Top right: apps on your PC.** One tap opens Claude, ChatGPT, Terminal, Obsidian, or anything else you list. When one of them wants you (its taskbar button flashes, e.g. an answer is ready), its pad gets a small pulsing dot until you open it. Anything can also ping a pad with `POST /ping/<pad id>`.
+- **Middle: Claude usage.** Your 5-hour and weekly Claude plan usage, and when each one resets. Tap it for the full picture: every limit (model-specific ones appear when your plan has them), a 7-day chart, where this week's usage went, and usage credits. This is optional.
 - **Bottom: a clock, and what your PC is playing.** Tap the clock for **Hearth**, a cozy full-screen clock: light that follows the day, drifting embers, an analog clock, and the sun's (or moon's) path across today's sky. The cover picture, title and a progress line, with play/pause and 10-second skips. Tap the line to jump.
 - **"Alexa, open sesame"** brings the deck back from the Alexa screen (Echo only, optional).
 

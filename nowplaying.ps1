@@ -21,7 +21,8 @@ $TProps = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaP
 $TStream = [Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType = WindowsRuntime]
 $asStream = [System.IO.WindowsRuntimeStreamExtensions].GetMethod("AsStream", [type[]]@([Windows.Storage.Streams.IRandomAccessStream, Windows.Storage.Streams, ContentType = WindowsRuntime]))
 $mgr = Wait-Op ($TMgr::RequestAsync()) $TMgr
-$lastArt = ""; $artNo = 0; $stuck = 0
+$lastArt = ""; $artNo = 0; $stuck = 0; $artHash = ""; $tries = 0
+$md5 = [System.Security.Cryptography.MD5]::Create()  # to tell whether the picture really changed
 $shown = $null  # the player the deck is showing; its jump/skip commands go to this one
 # (not [Console]::In: its ReadLineAsync waits for a line before returning)
 $in = New-Object System.IO.StreamReader ([Console]::OpenStandardInput()); $cmd = $in.ReadLineAsync()
@@ -50,15 +51,18 @@ while ($true) {
       if ($status -eq "Playing" -and $tl.LastUpdatedTime.Year -gt 2000) { $pos += ([DateTimeOffset]::Now - $tl.LastUpdatedTime).TotalSeconds }
       $len = ($tl.EndTime - $tl.StartTime).TotalSeconds
       $key = "$($p.Title)|$($p.Artist)|$($s.SourceAppUserModelId)"
-      if ($key -ne $lastArt) { $lastArt = $key; $tries = 0; if (Test-Path $ArtFile) { Remove-Item $ArtFile } }
-      # apps often add the picture a moment after the title, so keep asking for a few seconds
-      if (-not (Test-Path $ArtFile) -and $tries -lt 8) {
-        $tries++
-        if ($p.Thumbnail) {
-          $st = Wait-Op ($p.Thumbnail.OpenReadAsync()) $TStream
-          $io = $asStream.Invoke($null, @($st))  # called by reflection: PowerShell can't pick the overload for this object
-          $ms = New-Object System.IO.MemoryStream; $io.CopyTo($ms); $io.Dispose()
-          if ($ms.Length -gt 0) { [System.IO.File]::WriteAllBytes($ArtFile, $ms.ToArray()); $artNo++ }
+      if ($key -ne $lastArt) { $lastArt = $key; $tries = 0; $artHash = ""; if (Test-Path $ArtFile) { Remove-Item $ArtFile } }
+      # Apps often change the picture a moment AFTER the title (Brave switching tabs keeps the old video's picture for
+      # a second), so after a change the picture is read every second for 15 s, then every 10 s, and replaced
+      # whenever it's different
+      $tries++
+      if ($p.Thumbnail -and ($tries -le 15 -or $tries % 10 -eq 0)) {
+        $st = Wait-Op ($p.Thumbnail.OpenReadAsync()) $TStream
+        $io = $asStream.Invoke($null, @($st))  # called by reflection: PowerShell can't pick the overload for this object
+        $ms = New-Object System.IO.MemoryStream; $io.CopyTo($ms); $io.Dispose()
+        if ($ms.Length -gt 0) {
+          $hash = [Convert]::ToBase64String($md5.ComputeHash($ms.ToArray()))
+          if ($hash -ne $artHash) { [System.IO.File]::WriteAllBytes($ArtFile, $ms.ToArray()); $artNo++; $artHash = $hash }
         }
       }
       $out = @{ playing = ($status -eq "Playing"); status = $status; title = $p.Title; artist = $p.Artist; album = $p.AlbumTitle
