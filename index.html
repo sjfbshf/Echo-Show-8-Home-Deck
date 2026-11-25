@@ -444,7 +444,7 @@
     fetch(DECK.pc + "/nowplaying?k=" + encodeURIComponent(DECK.key), { signal: stop.signal })
       .then(function (r) { if (!r.ok) throw r; return r.json(); })
       .then(function (n) { NP = n; npAt = Date.now(); npMisses = 0; drawNow(); drawPings(n.pings || []); })
-      .catch(function () { if (++npMisses >= 3) { NP = null; drawNow(); } })  // PC off or asleep: "Nothing playing"
+      .catch(function () { if (++npMisses >= 3) { NP = null; drawNow(); drawPings([]); } })  // PC off or asleep: "Nothing playing"
       .then(function () { npBusy = false; });
   }
   // skip and jump: sent to the PC helper, which passes them to Windows' media controls

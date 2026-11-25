@@ -512,7 +512,7 @@
     document.getElementById("sAllDay").classList.toggle("on", ed.allDay);
     Array.prototype.forEach.call(document.querySelectorAll("#sNames button"), function (b) { b.classList.toggle("on", b.textContent === name); });
     Array.prototype.forEach.call(document.querySelectorAll("#sRemind button"), function (b) { b.classList.toggle("on", +b.dataset.m === ed.remind); });
-    var when = at.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + (ed.allDay ? " · all day" : " at " + time(at)), ring = new Date(+at - ed.remind * 60000);
+    var when = at.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) + (ed.allDay ? " · all day" : " at " + time(at)), ring = new Date(Alarm.ringTime({ at: +at, allDay: ed.allDay, remind: ed.remind }));
     document.getElementById("sSum").innerHTML = "<b>" + (name ? esc(name) : "Your event") + "</b> · " + when + "<br>" +
       (noReminder(ed.remind) ? "No reminder" : +ring <= Date.now() ? (ed.rang ? "Already reminded you" : "That reminder time has already passed, so it won't ring")
         : "The deck rings " + (ring.toDateString() === at.toDateString() ? "at " + time(ring) : ring.toLocaleDateString([], { weekday: "short" }) + " at " + time(ring)) + (ed.remind > 0 && !ed.allDay ? ", " + REMIND.filter(function (r) { return r[0] === ed.remind; })[0][1] + " before" : ""));
@@ -528,7 +528,7 @@
     if (!ed.allDay) { eH.commit(); eM.commit(); eP.commit(); }  // take what the wheels show right now
     var list = mineList(), at = +startOf(), name = document.getElementById("sName").value.trim() || "Event";
     var e = { id: ed.id || String(Date.now()), title: name, at: at, allDay: ed.allDay, remind: ed.remind,
-              fired: noReminder(ed.remind) || at - ed.remind * 60000 <= Date.now() };  // a reminder time that's already gone never rings
+              fired: noReminder(ed.remind) || Alarm.ringTime({ at: at, allDay: ed.allDay, remind: ed.remind }) <= Date.now() };  // a reminder time that's already gone never rings
     list = list.filter(function (x) { return x.id !== e.id; }).concat([e]).sort(function (a, b) { return a.at - b.at; });
     if (!saveMine(list)) {  // keep the sheet open so nothing typed is lost
       document.getElementById("sSum").innerHTML = "<b style='color:#ff6b6b'>Couldn’t save: the screen’s storage is full.</b><br>Delete some old events and try again.";

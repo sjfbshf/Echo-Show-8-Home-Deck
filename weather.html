@@ -69,13 +69,13 @@
   .h.wet .rain { color: #8fc6ff; font-weight: 650; }
   .h svg.wetsky { width: 54px; height: 54px; margin-top: 2px; }
   .h .fall { position: relative; width: 44px; height: 22px; margin-top: -8px; overflow: hidden; }
-  .h .fall i { position: absolute; top: 0; width: 3px; height: 10px; border-radius: 2px; background: #8fc6ff;
-               animation: fall 1.1s linear infinite; will-change: transform, opacity; }
+  .h .fall i { position: absolute; top: 0; width: 3px; height: 10px; border-radius: 2px; background: #8fc6ff; opacity: 0; }
+  .h.seen .fall i { animation: fall 1.1s linear infinite; will-change: transform, opacity; }
   .h .fall i:nth-child(1) { left: 10px; }
   .h .fall i:nth-child(2) { left: 21px; animation-delay: -.4s; }
   .h .fall i:nth-child(3) { left: 32px; animation-delay: -.75s; }
   @keyframes fall { from { transform: translateY(-10px); opacity: 0; } 30% { opacity: 1; } to { transform: translateY(20px); opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .h .fall i { animation: none; opacity: .8; transform: translateY(3px); } }
+  @media (prefers-reduced-motion: reduce) { .h .fall i, .h.seen .fall i { animation: none; opacity: .8; transform: translateY(3px); } }
   .drop { width: 10px; height: 13px; fill: currentColor; }
   svg.curve { position: absolute; left: 0; top: 0; height: 100%; pointer-events: none; overflow: visible; }
   svg.curve path { fill: none; stroke: url(#tempGrad); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
@@ -244,6 +244,13 @@
         (wet ? '<div class="fall"><i></i><i></i><i></i></div>' : "") +
         rain(h.precipitation_probability[i])));
     });
+    // rainy hours start their falling drops only while they're on screen
+    if (window.IntersectionObserver) {
+      if (window.rainWatch) window.rainWatch.disconnect();  // the strip was rebuilt: drop the old watcher
+      var watch = window.rainWatch = new IntersectionObserver(function (es) { es.forEach(function (e) { e.target.classList.toggle("seen", e.isIntersecting); }); },
+                                           { root: document.getElementById("scroll") });
+      Array.prototype.forEach.call(track.querySelectorAll(".h.wet"), function (c) { watch.observe(c); });
+    } else Array.prototype.forEach.call(track.querySelectorAll(".h.wet"), function (c) { c.classList.add("seen"); });
 
     // the temperature line runs through the middle of the strip, a number on every hour
     var lo = Math.min.apply(null, temps), hi = Math.max.apply(null, temps), top = 104, bottom = 178, width = PAD * 2 + n * CELL;

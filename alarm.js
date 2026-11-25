@@ -83,12 +83,21 @@
   // Each rings once, at its start time minus its "remind" minutes. One missed while the Echo was off or on
   // another website still rings if it's less than 10 minutes late (and the event hasn't started yet).
   var lastCheck = 0;
+  // when a reminder rings, in ms. All-day ones ring at 9 AM on the clock (that morning, or the day before) built from
+  // the calendar date, so a daylight-saving Sunday doesn't make it 8 or 10 AM; timed ones count minutes back from the start.
+  function ringTime(e) {
+    if (e.allDay && (e.remind === -540 || e.remind === 900)) {
+      var d = new Date(e.at);
+      return +new Date(d.getFullYear(), d.getMonth(), d.getDate() - (e.remind === 900 ? 1 : 0), 9);
+    }
+    return e.at - e.remind * 60000;
+  }
   function reminders(now) {
     var list, due = [], changed = false;
     try { list = JSON.parse(localStorage.getItem("deckEvents") || "[]"); } catch (e) { return; }
     list.forEach(function (e) {
       if (e.fired || e.remind == null || e.remind === -1) return;  // -1 = no reminder
-      var at = e.at - e.remind * 60000;
+      var at = ringTime(e);
       if (now < at) return;
       e.fired = true; changed = true;
       // rings if it's under 10 minutes late, and (for timed events) before the event starts. All-day reminders can
@@ -132,6 +141,7 @@
   }, 250);
 
   window.Alarm = {
+    ringTime: ringTime,
     S: S, save: save,
     next: function (min) {  // the next time the clock shows this minute of the day, as ms
       var d = new Date(), t = new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(min / 60), min % 60);

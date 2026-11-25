@@ -124,9 +124,13 @@
   // ---- the hands: each is one endless CSS rotation, started at the right spot, so they sweep with no script per frame ----
   function setHands() {
     var d = new Date(), sec = d.getSeconds() + d.getMilliseconds() / 1000, min = d.getMinutes() + sec / 60, hr = d.getHours() % 12 + min / 60;
-    $("hS").style.animationDelay = -sec + "s";
-    $("hM").style.animationDelay = -(min * 60) + "s";
-    $("hH").style.animationDelay = -(hr * 3600) + "s";
+    // restart each rotation, then start it at the right spot. (Only changing the delay of a running animation
+    // would add the time it already ran, so the hands would gain 10 minutes at every re-sync.)
+    [["hS", sec], ["hM", min * 60], ["hH", hr * 3600]].forEach(function (h) {
+      var el = $(h[0]);
+      el.style.animation = "none"; void el.offsetWidth;
+      el.style.animation = ""; el.style.animationDelay = -h[1] + "s";
+    });
   }
   setHands();
   document.addEventListener("visibilitychange", function () { if (!document.hidden) setHands(); });  // back in step after sleep
@@ -216,9 +220,11 @@
     if (!sun) { svg.innerHTML = ""; return; }
     var x0 = 30, x1 = 480, base = 118, top = 18, day = now >= sun.rise && now <= sun.set;
     var start, end;
+    // the next or previous calendar day (at noon, so a clock change can't skip or repeat a day)
+    var other = function (n) { return sunTimes(new Date(now.getFullYear(), now.getMonth(), now.getDate() + n, 12), +W.latitude, +W.longitude); };
     if (day) { start = sun.rise; end = sun.set; }
-    else if (now > sun.set) { start = sun.set; end = sunTimes(new Date(+now + 86400000), +W.latitude, +W.longitude).rise; }
-    else { start = sunTimes(new Date(+now - 86400000), +W.latitude, +W.longitude).set; end = sun.rise; }
+    else if (now > sun.set) { var nx = other(1); if (!nx) { svg.innerHTML = ""; return; } start = sun.set; end = nx.rise; }
+    else { var pv = other(-1); if (!pv) { svg.innerHTML = ""; return; } start = pv.set; end = sun.rise; }
     var f = Math.max(0, Math.min(1, (now - start) / (end - start)));
     var peak = day ? top : 62;  // the moon's arch is lower
     // a quadratic curve through (x0,base) - (mid, peak) - (x1,base): the point at f is easy to work out

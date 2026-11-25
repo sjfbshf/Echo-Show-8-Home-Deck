@@ -21,7 +21,8 @@ $TProps = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaP
 $TStream = [Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType = WindowsRuntime]
 $asStream = [System.IO.WindowsRuntimeStreamExtensions].GetMethod("AsStream", [type[]]@([Windows.Storage.Streams.IRandomAccessStream, Windows.Storage.Streams, ContentType = WindowsRuntime]))
 $mgr = Wait-Op ($TMgr::RequestAsync()) $TMgr
-$lastArt = ""; $artNo = 0; $stuck = 0; $artHash = ""; $tries = 0
+$lastArt = ""; $artNo = 0; $stuck = 0; $artHash = ""; $tries = 0; $hasArt = $false
+Remove-Item "$ArtFile*" -ErrorAction SilentlyContinue  # pictures from a previous run
 $md5 = [System.Security.Cryptography.MD5]::Create()  # to tell whether the picture really changed
 $shown = $null  # the player the deck is showing; its jump/skip commands go to this one
 # (not [Console]::In: its ReadLineAsync waits for a line before returning)
@@ -51,23 +52,33 @@ while ($true) {
       if ($status -eq "Playing" -and $tl.LastUpdatedTime.Year -gt 2000) { $pos += ([DateTimeOffset]::Now - $tl.LastUpdatedTime).TotalSeconds }
       $len = ($tl.EndTime - $tl.StartTime).TotalSeconds
       $key = "$($p.Title)|$($p.Artist)|$($s.SourceAppUserModelId)"
-      if ($key -ne $lastArt) { $lastArt = $key; $tries = 0; $artHash = ""; if (Test-Path $ArtFile) { Remove-Item $ArtFile } }
+      if ($key -ne $lastArt) { $lastArt = $key; $tries = 0; $artHash = ""; $hasArt = $false }
       # Apps often change the picture a moment AFTER the title (Brave switching tabs keeps the old video's picture for
       # a second), so after a change the picture is read every second for 15 s, then every 10 s, and replaced
       # whenever it's different
       $tries++
       if ($p.Thumbnail -and ($tries -le 15 -or $tries % 10 -eq 0)) {
-        $st = Wait-Op ($p.Thumbnail.OpenReadAsync()) $TStream
-        $io = $asStream.Invoke($null, @($st))  # called by reflection: PowerShell can't pick the overload for this object
-        $ms = New-Object System.IO.MemoryStream; $io.CopyTo($ms); $io.Dispose()
-        if ($ms.Length -gt 0) {
-          $hash = [Convert]::ToBase64String($md5.ComputeHash($ms.ToArray()))
-          if ($hash -ne $artHash) { [System.IO.File]::WriteAllBytes($ArtFile, $ms.ToArray()); $artNo++; $artHash = $hash }
-        }
+        # a picture that can't be read is skipped on its own: the title, time and keys still reach the deck
+        $io = $null
+        try {
+          $st = Wait-Op ($p.Thumbnail.OpenReadAsync()) $TStream
+          $io = $asStream.Invoke($null, @($st))  # called by reflection: PowerShell can't pick the overload for this object
+          $ms = New-Object System.IO.MemoryStream; $io.CopyTo($ms)
+          if ($ms.Length -gt 0) {
+            $hash = [Convert]::ToBase64String($md5.ComputeHash($ms.ToArray()))
+            if ($hash -ne $artHash) {
+              # each picture gets its own file (art.bin.<n>), written before its number is announced, so the deck can
+              # never get one song's picture for another; the one two back is removed
+              [System.IO.File]::WriteAllBytes("$ArtFile.$($artNo + 1)", $ms.ToArray())
+              $artNo++; $artHash = $hash; $hasArt = $true
+              Remove-Item "$ArtFile.$($artNo - 2)" -ErrorAction SilentlyContinue
+            }
+          }
+        } catch {} finally { if ($io) { $io.Dispose() } }
       }
       $out = @{ playing = ($status -eq "Playing"); status = $status; title = $p.Title; artist = $p.Artist; album = $p.AlbumTitle
                 app = $s.SourceAppUserModelId; position = [math]::Round([math]::Max(0, $pos), 1); length = [math]::Round([math]::Max(0, $len), 1)
-                art = $(if (Test-Path $ArtFile) { $artNo } else { 0 })
+                art = $(if ($hasArt) { $artNo } else { 0 })
                 # what the app lets you do: YouTube has no next/previous outside a playlist, but lets you jump in the video
                 next = $info.Controls.IsNextEnabled; prev = $info.Controls.IsPreviousEnabled; seek = $info.Controls.IsPlaybackPositionEnabled }
     }

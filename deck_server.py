@@ -174,16 +174,18 @@ def keep_in_front(hwnd, was_front):
 # its pad on the deck shows a small silent animation until you open that app. Apps or scripts can also ping a pad
 # themselves with POST /ping/<pad id> (for example from a Claude Code hook).
 PINGS = {}  # pad id -> when it pinged
+PING_LOCK = threading.Lock()
 
 
 def ping_exe(hwnd, on):
     exe = _exe_of(hwnd)
-    for pad, want in WINDOWS.items():
-        if want == exe:
-            if on:
-                PINGS[pad] = time.time()
-            else:
-                PINGS.pop(pad, None)
+    with PING_LOCK:
+        for pad, want in WINDOWS.items():
+            if want == exe:
+                if on:
+                    PINGS[pad] = time.time()
+                else:
+                    PINGS.pop(pad, None)
 
 
 def shell_hook_loop():
@@ -199,6 +201,10 @@ def shell_hook_loop():
     _u32.CreateWindowExW.restype = _wt.HWND
     _u32.CreateWindowExW.argtypes = [_wt.DWORD, _wt.LPCWSTR, _wt.LPCWSTR, _wt.DWORD, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                      ctypes.c_int, _wt.HWND, _wt.HMENU, _wt.HINSTANCE, _wt.LPVOID]
+    _u32.RegisterShellHookWindow.argtypes = _u32.DeregisterShellHookWindow.argtypes = _u32.DestroyWindow.argtypes = [_wt.HWND]
+    _u32.RegisterShellHookWindow.restype = _u32.DeregisterShellHookWindow.restype = _wt.BOOL
+    _u32.RegisterClassW.restype = _wt.ATOM
+    _u32.UnregisterClassW.argtypes = [_wt.LPCWSTR, _wt.HINSTANCE]
     shell_msg = _u32.RegisterWindowMessageW("SHELLHOOK")
 
     def proc(hwnd, msg, wparam, lparam):
@@ -209,16 +215,27 @@ def shell_hook_loop():
             elif code in (4, 0x8004):   # HSHELL_WINDOWACTIVATED / RUDEAPPACTIVATED: you opened it, so it's seen
                 ping_exe(lparam, False)
         return _u32.DefWindowProcW(hwnd, msg, wparam, lparam)
-    keep = WNDPROC(proc)  # held for the life of the thread, or Windows would call freed memory
+    keep = WNDPROC(proc)  # held until the window and class are gone, or Windows could call freed memory
     wc = WNDCLASSW(lpfnWndProc=keep, lpszClassName="HomeDeckShellHook")
-    _u32.RegisterClassW(ctypes.byref(wc))
-    hwnd = _u32.CreateWindowExW(0, "HomeDeckShellHook", "Home Deck", 0, 0, 0, 0, 0, None, None, None, None)
-    if not hwnd or not _u32.RegisterShellHookWindow(hwnd):
-        print("Pings from apps not available (couldn't listen to the taskbar)")
+    if not _u32.RegisterClassW(ctypes.byref(wc)):
+        print("Pings from apps not available (couldn't set up a listener)")
         return
-    msg = _wt.MSG()
-    while _u32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-        _u32.TranslateMessage(ctypes.byref(msg)); _u32.DispatchMessageW(ctypes.byref(msg))
+    hwnd, hooked = None, False
+    try:
+        hwnd = _u32.CreateWindowExW(0, "HomeDeckShellHook", "Home Deck", 0, 0, 0, 0, 0, None, None, None, None)
+        hooked = bool(hwnd) and bool(_u32.RegisterShellHookWindow(hwnd))
+        if not hooked:
+            print("Pings from apps not available (couldn't listen to the taskbar)")
+            return
+        msg = _wt.MSG()
+        while _u32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+            _u32.TranslateMessage(ctypes.byref(msg)); _u32.DispatchMessageW(ctypes.byref(msg))
+    finally:  # undo it all while `keep` still exists, so nothing can call into a freed callback
+        if hooked:
+            _u32.DeregisterShellHookWindow(hwnd)
+        if hwnd:
+            _u32.DestroyWindow(hwnd)
+        _u32.UnregisterClassW("HomeDeckShellHook", None)
 
 
 BUSY, BUSY_LOCK = set(), threading.Lock()  # pads being opened right now: a second quick tap doesn't open another
@@ -316,21 +333,30 @@ def refresh_usage():
     spend = u.get("spend") or {}
     if out["credits"] is not None:  # a prepaid balance, a spending cap and auto-reload, when the account has them
         out["credits"].update(balance=spend.get("balance"), cap=spend.get("cap"), auto_reload=spend.get("auto_reload"))
-    # history for the 7-day chart: one point per update, kept for 8 days
+    tmp = DATA / "usage.json.tmp"  # written aside, then swapped in whole, so /usage never reads half a file
+    tmp.write_text(json.dumps(out), encoding="utf-8")
+    os.replace(tmp, DATA / "usage.json")
+    try:
+        add_history(now, out)
+    except Exception as e:  # the chart's history must never stop the numbers above from updating
+        print(f"Usage history not updated: {type(e).__name__}")
+    return out
+
+
+def add_history(now, out):
+    """One point per update for the 7-day chart, kept for 8 days. Rows that don't look right are dropped."""
     hist_file = DATA / "usage-history.json"
     try:
         hist = json.loads(hist_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         hist = []
     cutoff = now.timestamp() - 8 * 86400
-    hist = [h for h in hist if h["t"] > cutoff] + [{"t": round(now.timestamp()), "s": (out["five_hour"] or {}).get("percent"), "w": (out["weekly"] or {}).get("percent")}]
+    ok = lambda h: isinstance(h, dict) and isinstance(h.get("t"), (int, float)) and h["t"] > cutoff
+    hist = [h for h in (hist if isinstance(hist, list) else []) if ok(h)]
+    hist.append({"t": round(now.timestamp()), "s": (out["five_hour"] or {}).get("percent"), "w": (out["weekly"] or {}).get("percent")})
     tmp = DATA / "usage-history.json.tmp"
     tmp.write_text(json.dumps(hist), encoding="utf-8")
     os.replace(tmp, hist_file)
-    tmp = DATA / "usage.json.tmp"  # written aside, then swapped in whole, so /usage never reads half a file
-    tmp.write_text(json.dumps(out), encoding="utf-8")
-    os.replace(tmp, DATA / "usage.json")
-    return out
 
 
 def usage_loop():
@@ -636,8 +662,8 @@ class Deck(BaseHTTPRequestHandler):
             try:
                 if v.startswith("c"):
                     img = COVER_IMG[v]
-                elif v.startswith("w") and v == NOW.get("art"):  # Windows' picture, only while it's still that one
-                    img = ART.read_bytes()
+                elif v.startswith("w") and v[1:].isdigit():  # Windows' picture: each one has its own numbered file
+                    img = ART.with_name(f"{ART.name}.{int(v[1:])}").read_bytes()
                 else:
                     raise KeyError(v)
             except (KeyError, OSError):
@@ -680,17 +706,19 @@ class Deck(BaseHTTPRequestHandler):
             pad = url.path.removeprefix("/ping/")
             if pad not in ACTIONS:
                 return self._send(404, b"Unknown pad")
-            if parse_qs(url.query).get("clear"):
-                PINGS.pop(pad, None)
-            elif not (WINDOWS.get(pad) and _exe_of(_u32.GetForegroundWindow()) == WINDOWS[pad]):  # you're already looking at it
-                PINGS[pad] = time.time()
+            with PING_LOCK:  # checked and set in one step, so opening the app at that moment can't be undone
+                if parse_qs(url.query).get("clear"):
+                    PINGS.pop(pad, None)
+                elif not (WINDOWS.get(pad) and _exe_of(_u32.GetForegroundWindow()) == WINDOWS[pad]):  # you're already looking at it
+                    PINGS[pad] = time.time()
             return self._send(204)
         target = ACTIONS.get(url.path.removeprefix("/run/"))
         if target is None:
             return self._send(404, b"Unknown pad")
-        PINGS.pop(url.path.removeprefix("/run/"), None)  # opening the app from the deck counts as seeing it
         if not start_pad(url.path.removeprefix("/run/"), target):
-            return self._send(502, b"Couldn't open it")  # the deck then says so, instead of "Opened"
+            return self._send(502, b"Couldn't open it")  # the deck then says so, instead of "Opened" (and the ping stays)
+        with PING_LOCK:
+            PINGS.pop(url.path.removeprefix("/run/"), None)  # opening the app from the deck counts as seeing it
         self._send(204)
 
 

@@ -177,7 +177,7 @@
     var list = u.limits && u.limits.length ? u.limits : [{ kind: "session", percent: (u.five_hour || {}).percent, resets_at: (u.five_hour || {}).resets_at },
                                                         { kind: "weekly_all", percent: (u.weekly || {}).percent, resets_at: (u.weekly || {}).resets_at }];
     list.forEach(function (x) {
-      var p = Math.round(x.percent || 0), row = box.appendChild(el("div", "lim"));
+      var gone = x.resets_at && Date.parse(x.resets_at) <= Date.now(), p = gone ? 0 : Math.round(x.percent || 0), row = box.appendChild(el("div", "lim"));
       var who = row.appendChild(el("div", "who", nameOf(x)));
       if (x.severity && x.severity !== "normal") who.appendChild(el("span", "chip " + x.severity, x.severity));
       who.appendChild(el("small", "", x.resets_at ? "resets " + when(x.resets_at) : ""));
@@ -219,11 +219,12 @@
   }
 
   // the 7-day chart: week % and 5-hour % on one 0-100 scale; tap or drag across it to read a moment
+  function pct(v) { return v == null ? "–" : Math.round(v) + "%"; }
   function drawChart(hist) {
     var box = $("chart"), W = box.clientWidth, H = box.clientHeight, padL = 34, padB = 22, now = Date.now() / 1000, from = now - 7 * 86400;
     var pts = hist.filter(function (h) { return h.t >= from; });
     box.querySelectorAll("svg, .empty").forEach(function (n) { n.remove(); });
-    if (pts.length < 2) {
+    if (pts.length < 1) {
       box.appendChild(el("div", "empty", "The chart fills in as the helper collects your usage, a point every 5 minutes. Check back in a few hours."));
       return;
     }
@@ -238,8 +239,16 @@
     // a gap of more than 30 min (PC asleep) breaks the line instead of drawing a straight jump
     function line(key, color) {
       var d = "", last = null;
-      pts.forEach(function (h) { if (h[key] == null) { last = null; return; } d += (last && h.t - last < 1800 ? "L" : "M") + x(h.t).toFixed(1) + "," + y(h[key]).toFixed(1); last = h.t; });
-      return "<path class='ln' stroke='" + color + "' d='" + d + "'/>";
+      var dots = "", run = [];
+      function endRun() { if (run.length === 1) dots += "<circle r='3.5' fill='" + color + "' cx='" + run[0][0] + "' cy='" + run[0][1] + "'/>"; run = []; }
+      pts.forEach(function (h) {
+        if (h[key] == null) { last = null; endRun(); return; }
+        var joined = last && h.t - last < 1800, px = x(h.t).toFixed(1), py = y(h[key]).toFixed(1);
+        if (!joined) endRun();
+        d += (joined ? "L" : "M") + px + "," + py; run.push([px, py]); last = h.t;
+      });
+      endRun();
+      return "<path class='ln' stroke='" + color + "' d='" + d + "'/>" + dots;
     }
     svg += line("s", "var(--s2)") + line("w", "var(--s1)") + "<line class='cross' id='cross' y1='0' y2='" + (H - padB) + "' style='display:none'/>";
     box.insertAdjacentHTML("afterbegin", "<svg viewBox='0 0 " + W + " " + H + "'>" + svg + "</svg>");
@@ -250,8 +259,9 @@
       var bx = x(best.t);
       cross.setAttribute("x1", bx); cross.setAttribute("x2", bx); cross.style.display = "";
       tip.innerHTML = new Date(best.t * 1000).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) +
-        "<br><i style='background:var(--s1)'></i>This week " + Math.round(best.w) + "%<br><i style='background:var(--s2)'></i>5-hour " + Math.round(best.s) + "%";
-      tip.style.display = "block"; tip.style.left = Math.min(W - 160, Math.max(0, bx / W * r.width + 12)) + "px"; tip.style.top = "8px";
+        "<br><i style='background:var(--s1)'></i>This week " + pct(best.w) + "<br><i style='background:var(--s2)'></i>5-hour " + pct(best.s);
+      tip.style.display = "block"; tip.style.top = "8px";
+      tip.style.left = Math.max(0, Math.min(box.clientWidth - tip.offsetWidth - 4, bx + 12)) + "px";
     }
     box.onpointerdown = box.onpointermove = function (e) { if (e.type === "pointerdown" || e.buttons) show(e); };
     box.onpointerup = box.onpointerleave = function () { setTimeout(function () { tip.style.display = "none"; cross.style.display = "none"; }, 1500); };
@@ -264,8 +274,8 @@
   function load() {
     get("/usage").then(function (u) {
       if (!u.updated) throw u;
-      localStorage.setItem("deckUsage", JSON.stringify(u));
       show(u);
+      try { localStorage.setItem("deckUsage", JSON.stringify(u)); } catch (e) {}
     }).catch(function () {
       var u; try { u = JSON.parse(localStorage.getItem("deckUsage")); } catch (e) {}
       if (u) show(u, true); else $("side").textContent = "Can't reach your PC";
@@ -275,7 +285,9 @@
   function show(u, old) {
     // the PC checks with Anthropic every 5 minutes; this screen asks the PC again at the same pace
     var upd = new Date(u.updated), next = new Date(+upd + 5 * 60000), t = function (d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
-    $("side").textContent = (old ? "PC not reached · " : "") + "Updated " + t(upd) + (old ? "" : " · next check about " + t(next));
+    var late = Date.now() > +next + 2 * 60000;
+    $("side").textContent = (old ? "PC not reached · " : "") + "Updated " + t(upd) +
+      (late ? " · " + inText(Date.now() - upd) + " ago (the PC may be asleep)" : old ? "" : " · next check about " + t(next));
     drawNow(u); drawLimits(u); drawCredits(u); drawSplit(u);
   }
   load(); setInterval(load, 5 * 60000);
