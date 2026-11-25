@@ -679,7 +679,7 @@ class Deck(BaseHTTPRequestHandler):
                 return self._send(404, b"Unknown pad")
             if parse_qs(url.query).get("clear"):
                 PINGS.pop(pad, None)
-            else:
+            elif not (WINDOWS.get(pad) and _exe_of(_u32.GetForegroundWindow()) == WINDOWS[pad]):  # you're already looking at it
                 PINGS[pad] = time.time()
             return self._send(204)
         target = ACTIONS.get(url.path.removeprefix("/run/"))

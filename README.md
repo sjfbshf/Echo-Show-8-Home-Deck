@@ -110,6 +110,17 @@ Without this, a Spotify that doesn't share with Windows gets an estimated positi
 
 The sign-in only keeps a renewal token, in `%USERPROFILE%\.homedeck\.spotify-token`, on your PC only. If Spotify ever stops accepting it (it expires after months unused), the log says to run `spotify_login.py` again. To disconnect, delete that file, or remove the app at [spotify.com/account/apps](https://www.spotify.com/account/apps/).
 
+### Pings from Claude Code and Codex (optional)
+
+Pads already ping when their app flashes its taskbar button. For exact "done" and "needs you" signals, let the apps call `ping_deck.py` (use `pythonw` so no window pops up):
+
+- **Claude Code:** in `~/.claude/settings.json`, add a `Stop` hook and a `Notification` hook that run
+  `pythonw "C:/path/to/ping_deck.py" auto`. `auto` pings the Terminal pad when Claude Code runs in a terminal, and the Claude pad when it runs in the Claude app.
+- **Codex:** `notify` in `~/.codex/config.toml` takes one command. To keep the one that's already there, put
+  `"pythonw", "C:/path/to/ping_deck.py", "chatgpt", "--"` in front of it. The script runs the original first, then pings.
+
+A ping is skipped when that app is already in front of you.
+
 ### "Alexa, open sesame" (Echo only, optional)
 
 On a rooted Echo Show, Alexa won't open apps. `echo-app/` is a tiny Android accessibility service that watches only Alexa's own screen. When your newest request reads "open sesame", it closes Alexa and brings Fully back to the front.
