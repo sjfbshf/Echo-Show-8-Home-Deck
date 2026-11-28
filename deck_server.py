@@ -483,9 +483,10 @@ def newest_chat():
 
 
 def usage_loop():
-    """Checks every 2 min; every 30 s while Claude Code is working (a chat file changed in the last minute).
-    Anthropic refuses this address when it's asked much more often (10 s apart was refused), so this is near the limit."""
-    last, seen, busy_until, hold_until, backoff, fast = float("-inf"), newest_chat(), 0.0, 0.0, 60, 30
+    """Checks every 2 min while Claude Code is working (a chat file changed in the last minute), every 5 min otherwise.
+    Anthropic refuses this address when it's asked more often: tested 2026-11-28, 10, 30 and 60 s apart were refused,
+    2 min apart ran 40 min with no refusal."""
+    last, seen, busy_until, hold_until, backoff, fast = float("-inf"), newest_chat(), 0.0, 0.0, 60, 120
     while True:
         now = time.monotonic()
         changed = newest_chat()
@@ -493,7 +494,7 @@ def usage_loop():
             seen, busy_until = changed, now + 60
         if now < hold_until:
             USAGE_NOW.clear()  # backing off: early checks wait too
-        elif (USAGE_NOW.is_set() and now - last >= 20) or now - last >= (fast if now < busy_until else 120):
+        elif (USAGE_NOW.is_set() and now - last >= 20) or now - last >= (fast if now < busy_until else max(fast, 300)):
             USAGE_NOW.clear()
             last = now
             try:
@@ -504,7 +505,7 @@ def usage_loop():
                 if getattr(e, "code", None) == 429:  # asked too often: wait, doubling up to 15 min
                     backoff = min(backoff * 2, 900)
                     hold_until = time.monotonic() + backoff
-                    fast = min(fast + 30, 120)  # and check less often from now on: it learns the limit
+                    fast = min(fast + 30, 300)  # and check less often from now on: it learns the limit
         time.sleep(2) if USAGE_NOW.is_set() else USAGE_NOW.wait(2)  # a finished chat: checked once 20 s have passed
 
 

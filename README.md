@@ -79,7 +79,7 @@ Some limits:
 
 ### Claude usage (optional)
 
-The helper reads the Claude sign-in that Claude Code saves on your PC (`~/.claude/.credentials.json`). It asks `api.anthropic.com` for your plan usage every 2 minutes, and every 30 seconds while Claude Code is working (it notices because a chat file on your PC changed; only file times are read). New numbers are pushed to the deck straight away over a live link. Anthropic refuses this address when it's asked too often, so each refusal makes the helper wait (up to 15 minutes) and check less often from then on. It only saves the numbers, and the sign-in never leaves your PC except to go to Anthropic.
+The helper reads the Claude sign-in that Claude Code saves on your PC (`~/.claude/.credentials.json`). It asks `api.anthropic.com` for your plan usage every 5 minutes, and every 2 minutes while Claude Code is working (it notices because a chat file on your PC changed; only file times are read). New numbers are pushed to the deck straight away over a live link. Anthropic refuses this address when it's asked more often than about every 2 minutes (30 and 60 seconds were tested and refused), so each refusal makes the helper wait (up to 15 minutes) and check less often from then on. It only saves the numbers, and the sign-in never leaves your PC except to go to Anthropic.
 
 - This uses an **unofficial** endpoint, so it may stop working at any time.
 - You need [Claude Code](https://claude.com/claude-code) installed and signed in on the PC.

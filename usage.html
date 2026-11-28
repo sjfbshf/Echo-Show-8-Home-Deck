@@ -283,9 +283,9 @@
     get("/usagehistory").then(drawChart, function () { drawChart([]); });
   }
   function show(u, old) {
-    // the PC checks with Anthropic every 2 minutes (every 30 s while Claude Code works) and sends it here straight away
+    // the PC checks with Anthropic every 5 minutes (every 2 minutes while Claude Code works) and sends it here straight away
     var upd = new Date(u.updated), t = function (d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
-    var late = Date.now() > +upd + 5 * 60000;
+    var late = Date.now() > +upd + 8 * 60000;
     $("side").textContent = (old ? "PC not reached · " : "") + "Updated " + t(upd) +
       (late ? " · " + inText(Date.now() - upd) + " ago (the PC may be asleep)" : old ? "" : " · live");
     drawNow(u); drawLimits(u); drawCredits(u); drawSplit(u);
