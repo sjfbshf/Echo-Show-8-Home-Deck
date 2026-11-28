@@ -604,7 +604,7 @@
   try { USAGE = JSON.parse(localStorage.getItem("deckUsage")); } catch (e) {}
   // "claude_usage": false in settings.json hides the panel
   if (DECK.usage === false) document.querySelector(".usage").style.visibility = "hidden";
-  else { loadUsage(); setInterval(loadUsage, 60000); }
+  else { loadUsage(); setInterval(loadUsage, 15000); }  // a small file on the PC, which checks every minute
 
   tick();
   setInterval(function () { tick(); if (new Date().getSeconds() === 0) drawUsage(); }, 1000);

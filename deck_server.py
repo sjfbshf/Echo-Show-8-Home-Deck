@@ -449,19 +449,33 @@ def add_history(now, out):
     cutoff = now.timestamp() - 8 * 86400
     ok = lambda h: isinstance(h, dict) and isinstance(h.get("t"), (int, float)) and h["t"] > cutoff
     hist = [h for h in (hist if isinstance(hist, list) else []) if ok(h)]
-    hist.append({"t": round(now.timestamp()), "s": (out["five_hour"] or {}).get("percent"), "w": (out["weekly"] or {}).get("percent")})
+    row = {"t": round(now.timestamp()), "s": (out["five_hour"] or {}).get("percent"), "w": (out["weekly"] or {}).get("percent")}
+    if hist and row["t"] - hist[-1]["t"] < 300 and (row["s"], row["w"]) == (hist[-1].get("s"), hist[-1].get("w")):
+        return  # checked every minute, but a point only when it moved or 5 min passed, so the file stays small
+    hist.append(row)
     tmp = DATA / "usage-history.json.tmp"
     tmp.write_text(json.dumps(hist), encoding="utf-8")
     os.replace(tmp, hist_file)
 
 
+USAGE_NOW = threading.Event()  # a Claude chat just finished (its hook pinged): check usage now
+
+
 def usage_loop():
+    wait = 60
     while True:
         try:
             refresh_usage()
+            wait = 60
         except Exception as e:  # logs the kind of problem only, never the sign-in
             print(f"Claude usage not updated: {type(e).__name__} {getattr(e, 'code', '')}")
-        time.sleep(300)
+            if getattr(e, "code", None) == 429:  # asked too often: back off, up to 15 min, and ignore early checks
+                wait = min(wait * 2, 900)
+                time.sleep(wait)
+                continue
+        USAGE_NOW.wait(wait)  # every minute, or sooner when a chat finishes
+        USAGE_NOW.clear()
+        time.sleep(5)  # gives the new usage a moment to show up, and a burst of finished chats makes one check
 
 
 # What the PC is playing, for the deck's now-playing card: nowplaying.ps1 reads Windows' media controls
@@ -810,6 +824,8 @@ class Deck(BaseHTTPRequestHandler):
                     clear_ping(pad)
                 else:  # always kept: one app (Claude) holds many chats, so "it's in front" doesn't mean you saw this one
                     set_ping(pad)
+            if pad in ("claude", "terminal") and not parse_qs(url.query).get("clear"):
+                USAGE_NOW.set()  # a Claude chat finished, so its usage just changed
             return self._send(204)
         pad = url.path.removeprefix("/run/")
         target = ACTIONS.get(pad)

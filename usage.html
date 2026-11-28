@@ -284,13 +284,13 @@
   }
   function show(u, old) {
     // the PC checks with Anthropic every 5 minutes; this screen asks the PC again at the same pace
-    var upd = new Date(u.updated), next = new Date(+upd + 5 * 60000), t = function (d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+    var upd = new Date(u.updated), next = new Date(+upd + 60000), t = function (d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
     var late = Date.now() > +next + 2 * 60000;
     $("side").textContent = (old ? "PC not reached · " : "") + "Updated " + t(upd) +
       (late ? " · " + inText(Date.now() - upd) + " ago (the PC may be asleep)" : old ? "" : " · next check about " + t(next));
     drawNow(u); drawLimits(u); drawCredits(u); drawSplit(u);
   }
-  load(); setInterval(load, 5 * 60000);
+  load(); setInterval(load, 30000);
 
   // same fit as the deck: designed at 1280x800, shrunk to the Echo's screen
   function fit() {
