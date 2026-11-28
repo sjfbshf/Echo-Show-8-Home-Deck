@@ -432,6 +432,9 @@ def refresh_usage():
     tmp = DATA / "usage.json.tmp"  # written aside, then swapped in whole, so /usage never reads half a file
     tmp.write_text(json.dumps(out), encoding="utf-8")
     os.replace(tmp, DATA / "usage.json")
+    with USAGE_CHANGED:  # wake the live links to the deck
+        USAGE_VER[0] += 1
+        USAGE_CHANGED.notify_all()
     try:
         add_history(now, out)
     except Exception as e:  # the chart's history must never stop the numbers above from updating
@@ -459,23 +462,50 @@ def add_history(now, out):
 
 
 USAGE_NOW = threading.Event()  # a Claude chat just finished (its hook pinged): check usage now
+USAGE_CHANGED, USAGE_VER = threading.Condition(), [0]  # bumped each time usage.json is rewritten
+CHATS = Path.home() / ".claude" / "projects"  # Claude Code writes each chat here as it works
+
+
+def newest_chat():
+    """When any Claude Code chat file last changed. Only file times are read, never what's in them."""
+    best, todo = 0.0, [str(CHATS)]
+    while todo:
+        try:
+            with os.scandir(todo.pop()) as found:
+                for e in found:
+                    if e.is_dir(follow_symlinks=False):
+                        todo.append(e.path)
+                    elif e.name.endswith(".jsonl"):
+                        best = max(best, e.stat().st_mtime)
+        except OSError:
+            pass  # a folder removed meanwhile, or no Claude Code here
+    return best
 
 
 def usage_loop():
-    wait = 60
+    """Checks every 2 min; every 30 s while Claude Code is working (a chat file changed in the last minute).
+    Anthropic refuses this address when it's asked much more often (10 s apart was refused), so this is near the limit."""
+    last, seen, busy_until, hold_until, backoff, fast = float("-inf"), newest_chat(), 0.0, 0.0, 60, 30
     while True:
-        try:
-            refresh_usage()
-            wait = 60
-        except Exception as e:  # logs the kind of problem only, never the sign-in
-            print(f"Claude usage not updated: {type(e).__name__} {getattr(e, 'code', '')}")
-            if getattr(e, "code", None) == 429:  # asked too often: back off, up to 15 min, and ignore early checks
-                wait = min(wait * 2, 900)
-                time.sleep(wait)
-                continue
-        USAGE_NOW.wait(wait)  # every minute, or sooner when a chat finishes
-        USAGE_NOW.clear()
-        time.sleep(5)  # gives the new usage a moment to show up, and a burst of finished chats makes one check
+        now = time.monotonic()
+        changed = newest_chat()
+        if changed > seen:
+            seen, busy_until = changed, now + 60
+        if now < hold_until:
+            USAGE_NOW.clear()  # backing off: early checks wait too
+        elif (USAGE_NOW.is_set() and now - last >= 20) or now - last >= (fast if now < busy_until else 120):
+            USAGE_NOW.clear()
+            last = now
+            try:
+                refresh_usage()
+                backoff = 60
+            except Exception as e:  # logs the kind of problem only, never the sign-in
+                print(f"{time.strftime('%H:%M:%S')} Claude usage not updated: {type(e).__name__} {getattr(e, 'code', '')}")
+                if getattr(e, "code", None) == 429:  # asked too often: wait, doubling up to 15 min
+                    backoff = min(backoff * 2, 900)
+                    hold_until = time.monotonic() + backoff
+                    fast = min(fast + 30, 120)  # and check less often from now on: it learns the limit
+        time.sleep(2) if USAGE_NOW.is_set() else USAGE_NOW.wait(2)  # a finished chat: checked once 20 s have passed
 
 
 # What the PC is playing, for the deck's now-playing card: nowplaying.ps1 reads Windows' media controls
@@ -763,6 +793,26 @@ class Deck(BaseHTTPRequestHandler):
         if url.path == "/usage":  # Claude usage for the deck's middle panel
             f = DATA / "usage.json"
             return self._send(200, f.read_bytes() if f.exists() else b"{}", "application/json")
+        if url.path == "/usagestream":  # a live link: sends the usage each time it changes, so the deck needn't ask
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.close_connection = True
+            ver = -1  # sends the current numbers straight away
+            try:
+                while True:
+                    with USAGE_CHANGED:
+                        USAGE_CHANGED.wait_for(lambda: USAGE_VER[0] != ver, timeout=25)
+                        new = USAGE_VER[0]
+                    if new != ver:
+                        ver, f = new, DATA / "usage.json"
+                        self.wfile.write(b"data: " + (f.read_bytes() if f.exists() else b"{}").replace(b"\n", b"") + b"\n\n")
+                    else:
+                        self.wfile.write(b": still here\n\n")  # so a dropped link is noticed within 25 s on both ends
+                    self.wfile.flush()
+            except OSError:
+                return  # the deck went to another page or the Wi-Fi dropped; it reconnects by itself
         if url.path == "/usagehistory":  # only the usage screen asks for this (it's the biggest answer here)
             f = DATA / "usage-history.json"
             return self._send(200, f.read_bytes() if f.exists() else b"[]", "application/json")

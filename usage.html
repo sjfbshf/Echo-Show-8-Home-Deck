@@ -283,14 +283,23 @@
     get("/usagehistory").then(drawChart, function () { drawChart([]); });
   }
   function show(u, old) {
-    // the PC checks with Anthropic every 5 minutes; this screen asks the PC again at the same pace
-    var upd = new Date(u.updated), next = new Date(+upd + 60000), t = function (d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
-    var late = Date.now() > +next + 2 * 60000;
+    // the PC checks with Anthropic every 2 minutes (every 30 s while Claude Code works) and sends it here straight away
+    var upd = new Date(u.updated), t = function (d) { return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }); };
+    var late = Date.now() > +upd + 5 * 60000;
     $("side").textContent = (old ? "PC not reached · " : "") + "Updated " + t(upd) +
-      (late ? " · " + inText(Date.now() - upd) + " ago (the PC may be asleep)" : old ? "" : " · next check about " + t(next));
+      (late ? " · " + inText(Date.now() - upd) + " ago (the PC may be asleep)" : old ? "" : " · live");
     drawNow(u); drawLimits(u); drawCredits(u); drawSplit(u);
   }
-  load(); setInterval(load, 30000);
+  load(); setInterval(load, 60000);  // backup for the live link
+  if (window.EventSource) new EventSource(DECK.pc + "/usagestream?k=" + encodeURIComponent(DECK.key)).onmessage = function (e) {
+    try {
+      var u = JSON.parse(e.data);
+      if (!u.updated) return;
+      show(u);
+      try { localStorage.setItem("deckUsage", JSON.stringify(u)); } catch (x) {}
+      get("/usagehistory").then(drawChart, function () {});
+    } catch (x) {}
+  };
 
   // same fit as the deck: designed at 1280x800, shrunk to the Echo's screen
   function fit() {

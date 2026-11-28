@@ -598,13 +598,23 @@
     var stop = new AbortController(); setTimeout(function () { stop.abort(); }, 4000);
     fetch(DECK.pc + "/usage?k=" + encodeURIComponent(DECK.key), { signal: stop.signal })
       .then(function (r) { if (!r.ok) throw r; return r.json(); })
-      .then(function (u) { if (u.updated) { USAGE = u; localStorage.setItem("deckUsage", JSON.stringify(u)); } drawUsage(); })
+      .then(gotUsage)
       .catch(function () { drawUsage(); });  // PC off: keep showing the last numbers with their age
+  }
+  function gotUsage(u) {
+    if (u.updated) { USAGE = u; try { localStorage.setItem("deckUsage", JSON.stringify(u)); } catch (e) {} }
+    drawUsage();
   }
   try { USAGE = JSON.parse(localStorage.getItem("deckUsage")); } catch (e) {}
   // "claude_usage": false in settings.json hides the panel
   if (DECK.usage === false) document.querySelector(".usage").style.visibility = "hidden";
-  else { loadUsage(); setInterval(loadUsage, 15000); }  // a small file on the PC, which checks every minute
+  else {
+    loadUsage(); setInterval(loadUsage, 60000);  // backup, in case the live link below is down
+    // live link: the PC sends new numbers the moment it has them (it reconnects by itself after a drop)
+    if (window.EventSource) new EventSource(DECK.pc + "/usagestream?k=" + encodeURIComponent(DECK.key)).onmessage = function (e) {
+      try { gotUsage(JSON.parse(e.data)); } catch (x) {}
+    };
+  }
 
   tick();
   setInterval(function () { tick(); if (new Date().getSeconds() === 0) drawUsage(); }, 1000);
